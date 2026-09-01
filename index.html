@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <title>序数探索器 · Transfinite-Ordinals-Explorer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body, #root {
+            height: 100%;
+        }
+        .scroll-area {
+            flex: 1;
+            overflow: auto;
+            padding: 8px 16px;
+        }
+        .scroll-area::-webkit-scrollbar {
+            width: 6px;
+        }
+        .scroll-area::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .scroll-area::-webkit-scrollbar-thumb {
+            background: #4a5568;
+            border-radius: 3px;
+        }
+    </style>
+    <!-- React CDN（必须在 ui/app.js 之前就绪） -->
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!--
+        记号文件清单 + 加载器（深度整理后取代手写的 70+ 个 <script> 标签）。
+        新增记号 = 在 core/notation-manifest.js 加一条，无需再改 index.html。
+        注意：必须在 <body> 内加载（loader 要向 document.body 注入 script）。
+    -->
+    <script>window.register = [];</script>
+    <script src="core/notation-manifest.js"></script>
+    <script src="core/loader.js"></script>
+</body>
+</html>
