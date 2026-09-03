@@ -1,6 +1,6 @@
 # 序数探索器 · Transfinite-Ordinals-Explorer
 
-googology 超限序数记号探索工具（v2.4.0）：输入「记号名 + 表达式」，生成**展开树**，
+googology 超限序数记号探索工具（v2.4.2）：输入「记号名 + 表达式」，生成**展开树**，
 逐层探索大序数记号的 FS（基本列）展开过程。
 
 ## 运行
@@ -21,9 +21,11 @@ npx serve .
 
 ## 使用
 
-- 输入 `PrSS 0,1,2` → 用 PrSS 展开该表达式
-- 输入记号名（如 `DEN`）→ 用该记号的 init() 示例建树
-- `limit DEN` / `limit(DEN)` → 同上（示例建树）
+任何输入都是指令：`tree <记号名> <表达式>` 生成展开树，**裸输入**是它的缩写，二者等价。
+
+- 输入 `PrSS 0,1,2`（= `tree PrSS 0,1,2`）→ 用 PrSS 展开该表达式
+- 输入记号名（如 `DEN`，= `tree DEN`）→ 用该记号的 init() 示例建树
+- `limit DEN` / `limit(DEN)` / `tree limit DEN` → 同上（示例建树）
 
 ### 显示视图切换（多种显示形式的记号）
 
@@ -61,25 +63,45 @@ npx serve .
 
 | 命令 | 功能 |
 |---|---|
+| `tree` | 生成展开树：`tree <记号名> <表达式>`（裸输入是它的缩写，见「使用」） |
+| `draw` | 绘制图案：`draw <Y序列> [DBMS\|DBMS'\|ADBMS]`（Y 序列山脉图，如 `draw 1,2,4,8`）；或 `draw <IBLP表达式>`（`(行)L` 结构自动识别为 IBLP/DEN2 图案，如 `draw (1,0)1(2,1,0)1`；也可 `draw iblp` 显式前缀，不带表达式画极限示例）。旧名 `mountain` 仍可用 |
 | `list` | 按分类（文件夹式）列出所有已注册记号，点击分类名展开/折叠 |
 | `convert` | 记号互译：`convert <源记号> <表达式> to <目标记号>`（如 `convert bm4 (0,0)(1,1,1) to 0y`） |
 | `clear` | 清屏 |
-| `save [n]` | 导出第 n 棵树（默认最后一棵）为 CSV |
+| `save [n] [True\|False]` | 导出第 n 棵树（默认最后一棵）；可选格式 `save xlsx 2` / `save csv 2`（默认 csv）；`True` 连无注释的行一起导出，`False`（默认）只导出有注释的行 |
+| `import [记号名]` | 导入 xlsx / csv 还原成一棵树（默认用最后一棵树的记号；仅支持能解析回表达式的记号，如序列/矩阵类） |
 | `set theme=dark` | 切换主题（dark/light/paper/solarizedlight/solarizeddark） |
 | `set default=N` | 初始展开层数（默认 2） |
 | `set additional=N` | 「加载更多」额外 FS 项数（默认 1） |
 | `set tier=N` | 展开层级 0-9（0=small, 1=single, 2=double, ...，默认 1，与远古版一致） |
+| `set font=N` | 整体字体大小 10-28（默认 16，界面按比例缩放；⚙️ 设置里也可调） |
 | `help` | 显示帮助 |
 
 ## 记号清单
 
-v2.4.0 起共 **85 个记号、71 个记号文件**，`/list` 按文件夹分类展示：
+当前共 **168 个记号（静态注册）、88 个记号文件**，`/list` 按文件夹分类展示：
 Y 序列 / Bashicu 矩阵系 / OCF 序数折叠函数 / aSAN 数列 / TON / DEN /
-ω 山记号 (MN) / 基础序列系统。
+ω 山记号 (MN) / GMS（通用矩阵系统）/ 基础序列系统。
 
 - 远古版（来自 hypcos/notation-explorer，算法原样保留）→ `notation/legacy/`
 - ne-rewritten 移植（依赖 `shared.js` 的 `window.NEUTILS`）→ `notation/rewritten/`
 - 用户自有（按远古接口重写）→ `notation/user/`
+
+### 带 n 家族记号
+
+移植自 ne-rewritten 的 generator 家族，每族静态注册常用档，**输入任意档位即按需生成**：
+
+| 家族 | 起点 | 输入示例 |
+|---|---|---|
+| n-MN（non triangular nMN，`n-mn`） | 1 | `30MN` / `30-mn` |
+| nBM-BHM（`n-bm-bhm`） | 1 | `40BM-BHM` / `40bmbhm` |
+| (>n)-UPMS（`upms-partial-n`） | 2 | `(>50)-UPMS` / `upms8` |
+| -1Y-nSS / T / BT / BT* / BT*' / wBT*-v3 / BTL（`*-1y-Kss…`） | 1 或 2 | `-1y-30ss` / `btl--1y-40ss` |
+| GMS n-P（GBMS / UPMS / LPMS2） | 2 | `GBMS 30-P` / `gbms30-p` |
+
+n 上限 **100**，超过会提示「不支持超过 100」；低于家族起点也会提示（如 UPMS 从 2 开始）。
+实现：各家族文件把自己的工厂注册到 `window.NOTATION_FAMILIES`，输入解析
+（`ui/notationParser.js` → `core/register.js` 的 `resolveFamilyInput`）命中后现场实例化并注册。
 
 用户自有：PrSS、PPS、SPS、DFSS、CNF（Cantor normal form，第一步：输入解析 + 内部表达式）。
 

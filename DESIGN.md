@@ -57,9 +57,9 @@ expander-v2/
 │   ├── parseShorthands.js   # 矩阵/序列简写解析
 │   ├── notation-manifest.js # 记号文件清单（v2.4.0 起：加载的唯一依据）
 │   └── loader.js            # 清单驱动加载器（拓扑排序 + 动态注入 script）
-├── notation/                # 记号文件，按来源分子目录（共 76 个文件 / 81 个记号）
+├── notation/                # 记号文件，按来源分子目录（共 88 个文件 / 168 个记号）
 │   ├── legacy/              # 远古版（hypcos/notation-explorer 算法原样，52 个文件）
-│   ├── rewritten/           # ne-rewritten 移植（依赖 shared.js 的 window.NEUTILS，19 个文件）
+│   ├── rewritten/           # ne-rewritten 移植（依赖 shared.js 的 window.NEUTILS，31 个文件）
 │   └── user/                # 用户自有记号（PrSS/PPS/SPS/DFSS/CNF，5 个文件）
 ├── ui/
 │   ├── app.js               # React 主应用（状态、导航、键盘、命令）
@@ -104,6 +104,20 @@ expander-v2/
 > 注意：远古版文件之间的依赖是「浏览器顶层 `<script>` 的 `var`/直接赋值
 > 全局可见」语义，Node `require` 无法复现，验证脚本必须用
 > `vm.runInThisContext`（见 `scripts/list-notation.mjs`）。
+
+### 4.2 带 n 家族记号的按需生成
+
+ne-rewritten 的 generator 家族（n-MN / nBM-BHM / partial-UPMS / -1Y-nSS 系列 / GMS n-P）
+在浏览器是「分类 + `create(n)` 运行期增删」。本项目是静态注册表，改为：
+
+- 家族文件静态预注册常用小档（n-MN 1..8 等），并把工厂注册到
+  `window.NOTATION_FAMILIES`：`{ family, label, start, max:100, match(lower)→{n,len}, idFor, ensure(n) }`；
+- 输入解析（`ui/notationParser.js`，家族优先于普通匹配）命中家族 → `core/register.js`
+  的 `resolveFamilyInput` 校验范围并调 `ensure(n)` **现场实例化注册**（幂等）；
+- n > 100 报「不支持超过 100」；n < start（如 UPMS/GMS n-P 从 2 起）报起点。
+
+`ensure` 由家族文件自身实现（复用 IIFE 内闭包的算法与 `register.push`），
+`resolveFamilyInput` 不接触算法，只做匹配、校验与幂等。
 
 ---
 
@@ -173,6 +187,13 @@ NOTATION_META[id] = {
 | ω-Y DBMS 显示 | `Omega_Y.ts: to_dbms_display`（ne-rewritten 移植） | `core/omegaYdbms.js` |
 | 标准化 | 无（全新） | 补充表 `standard` 字段；`/list` 标记 + 输入校验提示 |
 
+> 图案绘制以**独立指令**接入：`draw <Y序列> [DBMS|DBMS'|ADBMS]`（Y 序列山脉图，
+> `core/mountainDiagram.js` → `MountainView`）与 `draw <IBLP表达式>`（DEN2/IBLP
+> 图案，`core/iblpPattern.js` → `MountainView`；`ui/app.js` 的 `handleDrawCommand`
+> 统一分发）。IBLP 的 `(行)L(行)L…` 结构与 Y 序列完全不同，**自动识别**无需
+> 显式声明记号名（`isIblpDisplay`）；也可 `draw iblp` 显式前缀。旧名 `mountain`
+> 仍可用。
+
 `views` 的 `kind` 已支持（由 `core/converters.js` 解释）：
 
 | kind | 作用 | views 条目附加字段 |
@@ -181,7 +202,7 @@ NOTATION_META[id] = {
 | `bm-simple` / `bm-0y` / `bm-bms` | BMS 矩阵的 simple / 0-Y / 标准矩阵显示 | — |
 | `oy-dbms` | ω-Y → DBMS / DBMS' / ADBMS | `type` |
 | `bm-ocf` | BMS → BOCF OCN 显示（OCF / full / n.s.） | `type` |
-| `mountain` | ω-Y 山脉图（视图标记 `isMountain`，树上方 Canvas 绘制） | `type`（equiv，可选） |
+| `mountain` | ω-Y 山脉图（视图 kind；暂未启用 —— 山脉图当前走独立 `mountain` 指令） | `type`（equiv，可选） |
 
 约定：新增能力 = 补充表加字段 + 一个 core 模块 / ui 组件，**不改 index.html、
 不改记号算法文件、不新增全局依赖**；能力缺失时 UI 优雅降级（如无 `mountainData`
@@ -215,7 +236,10 @@ UI 每次「展开一次」= `expandNode(notation, parentList, item, 1, 0)`；
 
 保留用户旧版全部交互：
 
-- CLI 输入框：`记号名 表达式`（如 `PrSS 0,1,2`）、`/命令`、直接记号名（用示例建树）
+- CLI 输入框：**任何输入都是指令**。显式 `tree 记号名 表达式` 生成展开树；
+  裸输入（`记号名 表达式`、直接记号名、`limit ...`）是 `tree` 指令的缩写
+  （`parseCommand` 返回 `unknown` 时按 `tree` 处理，见 §7.2）；另有
+  `/命令`（list/convert/save/set/clear/help）
 - 键盘导航：`↑↓/jk` 导航、`←→/hl` 折叠、`,` 父节点、`0-9` 选中第 n 个 FS 项、
   `Enter/空格` 展开、`+=` 加载更多、`n` 注释、`Esc` 取消、`Shift+点击` 用 FSalter
 - `/set theme=...` 切换主题；`/set default=N` 初始展开层数；`/set additional=N` 加载更多数量；
@@ -238,6 +262,10 @@ themeKey / focusIdx / editingNote
 （如 `_collapsed`）控制，不污染核心数据。
 
 ### 7.2 输入解析（ui/notationParser.js）
+
+`parseNotation` 只负责「记号名 + 表达式」的语义解析，由 `tree` 指令（`ui/app.js`
+的 `handleTreeCommand`）调用；裸输入 = 隐式 `tree` 指令，因此**所有输入都经过
+命令通道**。解析流程：
 
 1. 剥离 `limit(...)` / `limit ...` 前缀（= 用记号 init 示例建树）
 2. 按 id / name / alias 匹配记号（最长匹配、无括号优先）

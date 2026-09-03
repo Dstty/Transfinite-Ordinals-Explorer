@@ -13,6 +13,10 @@
         }
         html, body, #root {
             height: 100%;
+            /* 整体字体缩放（font_size）用 transform scale + 尺寸补偿实现，
+               缩小字号时补偿后的布局盒会大于视口；隐藏页面级溢出，
+               避免出现横向滚动条（内部 .scroll-area 滚动不受影响） */
+            overflow: hidden;
         }
         .scroll-area {
             flex: 1;

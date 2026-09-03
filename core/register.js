@@ -150,6 +150,33 @@ export const NOTATION_META = {
   's-omega-pow-omega-mn': { aliases: ['sω^ωmn', 'sw^wmn'] },
   'lpms':       { aliases: [], views: [{ id: 'simple', label: 'simple', kind: 'bm-simple' }, { id: '0y', label: '0-Y', kind: 'bm-0y' }] },
   'lptss':      { aliases: [], views: [{ id: 'simple', label: 'simple', kind: 'bm-simple' }, { id: '0y', label: '0-Y', kind: 'bm-0y' }] },
+  // —— 2026 新接入：n-MN 家族（ne-rewritten n_MN.ts 移植，n=1..8；自带 parse）——
+  '1-mn':  { aliases: ['1mn'] },
+  '2-mn':  { aliases: ['2mn'] },
+  '3-mn':  { aliases: ['3mn'] },
+  '4-mn':  { aliases: ['4mn'] },
+  '5-mn':  { aliases: ['5mn'] },
+  '6-mn':  { aliases: ['6mn'] },
+  '7-mn':  { aliases: ['7mn'] },
+  '8-mn':  { aliases: ['8mn'] },
+  // —— 2026 新接入：nBM-BHM 家族（ne-rewritten BHM.ts BM_BHM(n) 移植，n=1..8；自带 parse）——
+  '1-bm-bhm': { aliases: ['1bmbhm'] },
+  '2-bm-bhm': { aliases: ['2bmbhm'] },
+  '3-bm-bhm': { aliases: ['3bmbhm'] },
+  '4-bm-bhm': { aliases: ['4bmbhm'] },
+  '5-bm-bhm': { aliases: ['5bmbhm'] },
+  '6-bm-bhm': { aliases: ['6bmbhm'] },
+  '7-bm-bhm': { aliases: ['7bmbhm'] },
+  '8-bm-bhm': { aliases: ['8bmbhm'] },
+  // —— 2026 新接入：(>n)-UPMS 家族（ne-rewritten UPMS.ts partial_UPMS(n) 移植，n=2..9；自带 parse）——
+  'upms-partial-2': { aliases: ['upms2'] },
+  'upms-partial-3': { aliases: ['upms3'] },
+  'upms-partial-4': { aliases: ['upms4'] },
+  'upms-partial-5': { aliases: ['upms5'] },
+  'upms-partial-6': { aliases: ['upms6'] },
+  'upms-partial-7': { aliases: ['upms7'] },
+  'upms-partial-8': { aliases: ['upms8'] },
+  'upms-partial-9': { aliases: ['upms9'] },
 };
 
 // ============================================================================
@@ -184,4 +211,31 @@ export function buildNameMap() {
     }
   }
   return map;
+}
+
+// ============================================================================
+//  家族（带 n 可调记号）按需生成
+//  家族文件（n-MN.js / nBM-BHM.js / partial-UPMS.js / *-nSS.js / GMS.js）在自身
+//  闭包内把 { family, label, start, max, match, idFor, ensure } 注册到
+//  window.NOTATION_FAMILIES；本函数在输入解析时按需把 n 档实例化（幂等）。
+//  match(lower) 需返回 { n, len }（len = 家族名部分消耗的字符数）或 null；
+//  静态预注册只覆盖常用小档，输入更大档（如 30MN）时这里现场生成。
+// ============================================================================
+export function resolveFamilyInput(normalized) {
+  const fams = (typeof window !== 'undefined' && window.NOTATION_FAMILIES) || [];
+  for (const fam of fams) {
+    const res = typeof fam.match === 'function' ? fam.match(normalized) : null;
+    if (!res || !Number.isFinite(res.n)) continue;
+    const n = res.n;
+    if (n > fam.max) {
+      throw new Error(`${fam.label}：n 最大支持 ${fam.max}（收到 ${n}，不支持超过 ${fam.max}）`);
+    }
+    if (n < fam.start) {
+      throw new Error(`${fam.label}：n 从 ${fam.start} 开始（收到 ${n}）`);
+    }
+    const id = fam.ensure(n);
+    const nt = getAllNotations().find((x) => x.id === id);
+    return { notationId: id, notationName: nt ? nt.name : id, rest: normalized.slice(res.len) };
+  }
+  return null;
 }

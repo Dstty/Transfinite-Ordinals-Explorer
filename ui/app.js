@@ -9,13 +9,18 @@
 import { THEMES } from './themes.js';
 import { TreeNodeView, ensureUids } from './TreeNodeView.js';
 import { FolderView } from './FolderView.js';
+import { MountainView } from './MountainView.js';
 import { parseNotation } from './notationParser.js';
 import { parseCommand } from './commandParser.js';
-import { downloadTreeAsCSV } from './exportUtils.js';
+import { downloadTreeAsCSV, downloadTreeAsXLSX } from './exportUtils.js';
+import { parseImportFile, buildImportTree } from '../core/importer.js';
 import { expandNode, deepClone } from '../core/engine.js';
 import { getNotation, getAllNotations, NOTATION_META, buildNameMap } from '../core/register.js';
 import { convert, listConverterTargets, resolveTreeViews } from '../core/converters.js';
-import { buildNotationList } from './notationList.js';
+import { parseSequence } from '../core/parseShorthands.js';
+import { omegaY_diagram } from '../core/mountainDiagram.js';
+import { parseIblpDisplay, iblp_diagram, isIblpDisplay } from '../core/iblpPattern.js';
+import { buildNotationList, countNotationsForDisplay } from './notationList.js';
 import { HELP_LINES } from './helpText.js';
 
 const React = window.React;
@@ -30,6 +35,12 @@ const React = window.React;
  * 这样无论调用几次结果都一致，不会造成字符重复。
  */
 const normalizePunct = s => s.replace(/（/g, '(').replace(/）/g, ')').replace(/，/g, ',');
+
+/** IBLP 极限表达式示例（Googology Wiki 上 test_alpha0 规定的极限图案）。 */
+const IBLP_LIMIT_EXAMPLE = '(1,0)1(2,1,0)1(3,2,1,0)2(4,3,2)1(5,4,3,2)2(6,5,4)1';
+
+/** 图案缩放钳制：0.5x ~ 8x，保留 2 位小数。 */
+const clampZoom = (z) => Math.min(8, Math.max(0.5, Math.round(z * 100) / 100));
 
 /**
  * 递归查找包含指定节点的列表（父列表）。node 位于根列表时返回 null。
@@ -103,7 +114,7 @@ function App() {
   const [nextItemId, setNextItemId] = React.useState(0);
   const [nextTreeIndex, setNextTreeIndex] = React.useState(0);
   const [input, setInput] = React.useState("");
-  const [settings, setSettings] = React.useState({ defaultExpand: 2, additionalExpand: 0, tier: 0 });
+  const [settings, setSettings] = React.useState({ defaultExpand: 2, additionalExpand: 0, tier: 0, fontSize: 16 });
   const [themeKey, setThemeKey] = React.useState("dark");
   const [focusIdx, setFocusIdx] = React.useState(-1);
   const [editingNote, setEditingNote] = React.useState(null);
@@ -238,6 +249,24 @@ function App() {
     ));
   }, []);
 
+  // —— tree / draw 输出块折叠：收成一行标题（UI 附加字段 collapsed，核心不感知）——
+  const toggleItemCollapse = React.useCallback((itemId) => {
+    setItems(prev => prev.map(it =>
+      (it.type === 'tree' || it.type === 'draw') && it.id === itemId
+        ? { ...it, collapsed: !it.collapsed }
+        : it
+    ));
+  }, []);
+
+  // —— draw 图案缩放：±1.5 倍，钳制 0.5x~8x（UI 附加字段 zoom，核心不感知）——
+  const setItemZoom = React.useCallback((itemId, zoom) => {
+    setItems(prev => prev.map(it =>
+      it.type === 'draw' && it.id === itemId
+        ? { ...it, zoom: clampZoom(zoom) }
+        : it
+    ));
+  }, []);
+
   // —— convert：记号互译（core/converters.js 注册表）——
   const handleConvertCommand = React.useCallback((parsed) => {    if (parsed.error) { addOutput(parsed.error, 'error'); return; }
     const map = buildNameMap();
@@ -277,115 +306,125 @@ function App() {
     addOutput(`« ${result.display}`, 'output');
   }, [addOutput]);
 
-  const handleSaveCommand = React.useCallback((parsedNum) => {
+  const handleSaveCommand = React.useCallback((parsed) => {
     if (treeEntries.length === 0) {
       addOutput('没有可保存的树', 'error');
       return;
     }
     let target = null;
-    if (parsedNum !== undefined) {
-      target = treeEntries.find(e => e.treeIndex === parsedNum - 1) || null;
+    if (parsed.num !== undefined) {
+      target = treeEntries.find(e => e.treeIndex === parsed.num - 1) || null;
       if (!target) {
-        addOutput(`找不到第 ${parsedNum} 棵树`, 'error');
+        addOutput(`找不到第 ${parsed.num} 棵树`, 'error');
         return;
       }
     } else {
       target = treeEntries[treeEntries.length - 1];
     }
-    downloadTreeAsCSV(target.notation, target.rootList, target.name, addOutput);
+    if (parsed.format === 'xlsx') {
+      downloadTreeAsXLSX(target.notation, target.rootList, target.name, addOutput, parsed.includeNoNote);
+    } else {
+      downloadTreeAsCSV(target.notation, target.rootList, target.name, addOutput, parsed.includeNoNote);
+    }
   }, [treeEntries, addOutput]);
 
-  // ==========================================================================
-  //  提交输入
-  // ==========================================================================
-  const handleSubmit = React.useCallback(async () => {
-    // 兜底归一化：粘贴/拖入等未走 composition 事件的中文标点，提交时也转半角
-    const raw = normalizePunct(input.trim());
-    if (!raw) return;
-    setInput("");
-    addOutput(`▸ ${raw}`, 'input');
+  // —— import：把导出的 xlsx/csv 还原成一棵树（需记号可解析回表达式）——
+  //   import            —— 用最后一棵树的记号解析
+  //   import <记号名>   —— 用指定记号解析（如 import bm4）
+  const handleImportCommand = React.useCallback((arg) => {
+    const text = (arg || '').trim();
 
-    // —— 命令（可带 / 前缀，也可不带，如 help / set tier=0）——
-    const parsed = parseCommand(raw);
-    if (parsed.command !== 'unknown') {
-      switch (parsed.command) {
-        case 'clear':
-          setItems([]);
-          setNextItemId(0);
-          setNextTreeIndex(0);
-          setFocusIdx(-1);
-          return;
-        case 'list': {
-          const all = getAllNotations();
-          const categories = buildNotationList(all);
-          addOutput(`» 已注册 ${all.length} 个记号（点击分类展开）:`, 'info');
-          setItems(prev => [...prev, { id: nextItemId + 1, type: 'folder', categories }]);
+    // 确定记号：显式 arg 优先，否则取最后一棵树
+    let notation = null;
+    let notationName = '';
+    if (text) {
+      const map = buildNameMap();
+      const norm = (s) => s.toLowerCase().replace(/\s+/g, '');
+      const id = map.get(norm(text));
+      if (!id) { addOutput(`未找到记号: ${text}（/list 查看）`, 'error'); return; }
+      notation = getNotation(id);
+      notationName = (notation && notation.name) || id;
+    } else {
+      const last = treeEntries[treeEntries.length - 1];
+      if (!last) { addOutput('没有可导入的树：请先建树，或指定记号（如 import bm4）', 'error'); return; }
+      notation = last.notation;
+      notationName = last.name;
+    }
+    if (!notation) { addOutput('记号不存在', 'error'); return; }
+
+    // 该记号必须能解析回表达式（有 parse）
+    const meta = NOTATION_META[notation.id] || {};
+    const hasParser = typeof notation.parse === 'function' || typeof meta.parse === 'function';
+    if (!hasParser) {
+      addOutput(`记号 ${notationName} 暂不支持导入（没有 parse）——只能 limit 建树，无法把展示文本解析回表达式`, 'error');
+      return;
+    }
+
+    // 文件选择（xlsx / csv）
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    input.onchange = (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const lower = file.name.toLowerCase();
+      const isXlsx = lower.endsWith('.xlsx') || lower.endsWith('.xls');
+      const reader = new FileReader();
+      reader.onerror = () => addOutput('读取文件失败', 'error');
+      reader.onload = async () => {
+        try {
+          const data = isXlsx ? reader.result : (typeof reader.result === 'string' ? reader.result : new TextDecoder('utf-8').decode(reader.result));
+          const rows = await parseImportFile(file.name, data);
+          if (rows.length === 0) { addOutput('文件为空或没有可读取的行', 'error'); return; }
+          const result = buildImportTree(notation, meta, rows);
+          if (result.error) { addOutput(result.error, 'error'); return; }
+          const treeIndex = nextTreeIndex;
+          setNextTreeIndex(i => i + 1);
+          setItems(prev => [...prev, {
+            id: nextItemId,
+            type: 'tree',
+            treeIndex,
+            notation,
+            rootList: result.rootList,
+            name: notationName,
+          }]);
           setNextItemId(i => i + 1);
+          setFocusIdx(-1);
+          ensureUids(result.rootList);
+          addOutput(`» 导入 ${result.count} 个表达式到「${notationName}」（${file.name}）`, 'info');
+          if (result.unsupported && result.unsupported.length > 0) {
+            const shown = result.unsupported.slice(0, 10).join('、');
+            addOutput(`⚠ 有 ${result.unsupported.length} 行无法解析为表达式（未导入）：${shown}${result.unsupported.length > 10 ? ' …' : ''}`, 'error');
+          }
+          refreshUI();
           setTimeout(() => {
             if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
           }, 0);
-          return;
+        } catch (err) {
+          addOutput(`导入失败: ${err && err.message ? err.message : err}`, 'error');
         }
-        case 'help': {
-          for (const line of HELP_LINES) addOutput(line, 'info');
-          return;
-        }
-        case 'save': {
-          handleSaveCommand(parsed.num);
-          return;
-        }
-        case 'convert': {
-          handleConvertCommand(parsed);
-          return;
-        }
-        case 'set': {
-          const key = parsed.key;
-          const valStr = parsed.value;          if (key === 'theme') {
-            const themeMap = {
-              dark: "dark", light: "light", paper: "paper",
-              solarizedlight: "solarizedLight", sollight: "solarizedLight", sl: "solarizedLight",
-              solarizeddark: "solarizedDark", soldark: "solarizedDark", sd: "solarizedDark"
-            };
-            const tk = themeMap[valStr.toLowerCase().replace(/[\s.]+/g, "")];
-            if (tk) {
-              setThemeKey(tk);
-              addOutput(`» Theme: ${THEMES[tk].name}`, 'info');
-            } else {
-              addOutput(`未知主题: ${valStr}`, 'error');
-            }
-          } else {
-            const val = parseInt(valStr, 10);
-            if (isNaN(val) || val < 0) {
-              addOutput(`无效数值: ${valStr}`, 'error');
-              return;
-            }
-            if (key === 'default_expand' || key === 'default') {
-              if (val < 1) { addOutput('default_expand 至少为 1', 'error'); return; }
-              setSettings(s => ({ ...s, defaultExpand: val }));
-              addOutput(`» default expand = ${val}`, 'info');
-            } else if (key === 'additional_expand' || key === 'additional') {
-              if (val < 0) { addOutput('additional_expand 至少为 0', 'error'); return; }
-              setSettings(s => ({ ...s, additionalExpand: val }));
-              addOutput(`» additional expand = ${val}`, 'info');
-            } else if (key === 'tier') {
-              if (val > 9) { addOutput('tier 范围 0-9（与远古版一致）', 'error'); return; }
-              setSettings(s => ({ ...s, tier: val }));
-              addOutput(`» expansion tier = ${val} (${tierName(val)})`, 'info');
-            } else {
-              addOutput(`未知设置: ${key}`, 'error');
-            }
-          }
-          return;
-        }
-        default:
-          addOutput(`未知命令: ${raw}`, 'error');
-          return;
-      }
-    }
+      };
+      if (isXlsx) reader.readAsArrayBuffer(file);
+      else reader.readAsText(file, 'utf-8');
+      // 清理 DOM
+      document.body.removeChild(input);
+    };
+    document.body.appendChild(input);
+    input.click();
+  }, [treeEntries, nextItemId, nextTreeIndex, addOutput, refreshUI]);
 
-    // —— 记号表达式 ——
+  // —— tree：生成记号展开树（主体指令；裸输入是它的缩写，见 handleSubmit）——
+  //   tree <记号名> <表达式>  如 tree PrSS 0,1,2
+  //   tree <记号名>           用该记号 init() 示例建树（tree DEN）
+  //   tree limit <记号名>     同上（tree limit DEN / tree limit(DEN)）
+  const handleTreeCommand = React.useCallback((arg) => {
+    const text = (arg || '').trim();
+    if (!text) {
+      addOutput('用法: tree <记号名> <表达式>（如 tree PrSS 0,1,2；tree DEN 用示例建树）', 'error');
+      return;
+    }
     try {
-      const parsed = parseNotation(raw);
+      const parsed = parseNotation(text);
       const notation = getNotation(parsed.notationId);
       if (!notation) throw new Error(`记号不存在: ${parsed.notationId}`);
 
@@ -436,7 +475,219 @@ function App() {
     } catch (err) {
       addOutput(`错误: ${err.message}`, 'error');
     }
-  }, [input, settings, addOutput, nextItemId, nextTreeIndex, refreshUI, handleSaveCommand]);
+  }, [settings, nextItemId, nextTreeIndex, refreshUI, addOutput]);
+
+  // —— draw：绘制图案（独立指令，不经过 tree / 视图按钮）——
+  //   draw <Y序列> [模式]                  Y 序列山脉图（模式: DBMS / DBMS' / ADBMS）
+  //   draw <Y序列> [模式]     Y 序列山脉图（模式: DBMS / DBMS' / ADBMS）
+  //   draw <IBLP表达式>       IBLP（DEN2）图案 —— 结构自动识别，无需显式声明；
+  //                           也可 draw iblp <表达式> 显式前缀（不带表达式画极限示例）
+  const handleDrawCommand = React.useCallback((arg) => {
+    const text = (arg || '').trim();
+    if (!text) {
+      addOutput("用法: draw <Y序列> [DBMS|DBMS'|ADBMS] 或 draw <IBLP表达式>", 'error');
+      return;
+    }
+
+    // —— IBLP：显式前缀（den2/iblp）或结构自动识别（(行)L(行)L…）——
+    const first = text.split(/\s+/)[0].toLowerCase();
+    let exprStr, isIblp;
+    if (buildNameMap().get(first) === 'den2') {
+      isIblp = true;
+      exprStr = text.slice(first.length).trim();
+      if (!exprStr) exprStr = IBLP_LIMIT_EXAMPLE; // 极限示例
+    } else if (isIblpDisplay(text)) {
+      isIblp = true;
+      exprStr = text;
+    } else if (/^limit$/i.test(text)) {
+      addOutput('Limit 是 IBLP 极限表达式，没有具体图案可绘制', 'error');
+      return;
+    } else {
+      isIblp = false;
+      exprStr = text;
+    }
+
+    if (isIblp) {
+      let rows;
+      try {
+        rows = parseIblpDisplay(exprStr);
+      } catch (e) {
+        addOutput(`IBLP 解析失败: ${e.message}`, 'error');
+        return;
+      }
+      const diagram = iblp_diagram(rows);
+      if (!diagram) {
+        addOutput('无法为该表达式绘制图案', 'error');
+        return;
+      }
+      const itemId = nextItemId;
+      setNextItemId(i => i + 1);
+      setItems(prev => [...prev, {
+        id: itemId,
+        type: 'draw',
+        label: 'IBLP 图案',
+        diagram,
+        exprText: exprStr,
+        equiv: undefined,
+      }]);
+      setFocusIdx(-1);
+      setTimeout(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, 0);
+      return;
+    }
+
+    // —— Y 序列山脉图分支（原 mountain 逻辑）——
+    // 尾部可选显示模式；其余部分作为 Y 序列表达式（exprStr 已在上面声明）
+    let equiv;
+    const modeMatch = text.match(/\s+(dbms'|adbms|dbms)\s*$/i);
+    if (modeMatch) {
+      equiv = modeMatch[1].toUpperCase() === "DBMS'" ? "DBMS'" : modeMatch[1].toUpperCase();
+      exprStr = text.slice(0, modeMatch.index).trim();
+    }
+    if (!exprStr) {
+      addOutput('缺少 Y 序列表达式', 'error');
+      return;
+    }
+    let seq;
+    try {
+      seq = parseSequence(exprStr);
+    } catch (e) {
+      addOutput(`序列解析失败: ${e.message}`, 'error');
+      return;
+    }
+    if (!Array.isArray(seq)) {
+      addOutput('山脉图需要 Y 序列表达式（如 1,2,4,8）', 'error');
+      return;
+    }
+    const diagram = omegaY_diagram(seq, { equiv });
+    if (!diagram) {
+      addOutput('无法为该表达式绘制山脉图', 'error');
+      return;
+    }
+    const itemId = nextItemId;
+    setNextItemId(i => i + 1);
+    setItems(prev => [...prev, {
+      id: itemId,
+      type: 'draw',
+      label: '山脉图',
+      diagram,
+      exprText: exprStr,
+      equiv,
+    }]);
+    setFocusIdx(-1);
+    setTimeout(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }, 0);
+  }, [addOutput, nextItemId, setItems, setFocusIdx]);
+
+  // ==========================================================================
+  //  提交输入
+  // ==========================================================================
+  const handleSubmit = React.useCallback(async () => {
+    // 兜底归一化：粘贴/拖入等未走 composition 事件的中文标点，提交时也转半角
+    const raw = normalizePunct(input.trim());
+    if (!raw) return;
+    setInput("");
+    addOutput(`▸ ${raw}`, 'input');
+
+    // —— 命令（可带 / 前缀，也可不带，如 help / set tier=0）——
+    const parsed = parseCommand(raw);
+    if (parsed.command !== 'unknown') {
+      switch (parsed.command) {
+        case 'clear':
+          setItems([]);
+          setNextItemId(0);
+          setNextTreeIndex(0);
+          setFocusIdx(-1);
+          return;
+        case 'list': {
+          const all = getAllNotations();
+          const categories = buildNotationList(all);
+          addOutput(`» 已注册 ${countNotationsForDisplay(all)} 个记号（点击分类展开，双击记号直接建树）:`, 'info');
+          setItems(prev => [...prev, { id: nextItemId + 1, type: 'folder', categories }]);
+          setNextItemId(i => i + 1);
+          setTimeout(() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }, 0);
+          return;
+        }
+        case 'help': {
+          for (const line of HELP_LINES) addOutput(line, 'info');
+          return;
+        }
+        case 'save': {
+          handleSaveCommand(parsed);
+          return;
+        }
+        case 'import': {
+          handleImportCommand(parsed.arg);
+          return;
+        }
+        case 'convert': {
+          handleConvertCommand(parsed);
+          return;
+        }
+        case 'tree': {
+          handleTreeCommand(parsed.arg);
+          return;
+        }
+        case 'draw': {
+          handleDrawCommand(parsed.arg);
+          return;
+        }
+        case 'set': {
+          const key = parsed.key;
+          const valStr = parsed.value;          if (key === 'theme') {
+            const themeMap = {
+              dark: "dark", light: "light", paper: "paper",
+              solarizedlight: "solarizedLight", sollight: "solarizedLight", sl: "solarizedLight",
+              solarizeddark: "solarizedDark", soldark: "solarizedDark", sd: "solarizedDark"
+            };
+            const tk = themeMap[valStr.toLowerCase().replace(/[\s.]+/g, "")];
+            if (tk) {
+              setThemeKey(tk);
+              addOutput(`» Theme: ${THEMES[tk].name}`, 'info');
+            } else {
+              addOutput(`未知主题: ${valStr}`, 'error');
+            }
+          } else {
+            const val = parseInt(valStr, 10);
+            if (isNaN(val) || val < 0) {
+              addOutput(`无效数值: ${valStr}`, 'error');
+              return;
+            }
+            if (key === 'default_expand' || key === 'default') {
+              if (val < 1) { addOutput('default_expand 至少为 1', 'error'); return; }
+              setSettings(s => ({ ...s, defaultExpand: val }));
+              addOutput(`» default expand = ${val}`, 'info');
+            } else if (key === 'additional_expand' || key === 'additional') {
+              if (val < 0) { addOutput('additional_expand 至少为 0', 'error'); return; }
+              setSettings(s => ({ ...s, additionalExpand: val }));
+              addOutput(`» additional expand = ${val}`, 'info');
+            } else if (key === 'tier') {
+              if (val > 9) { addOutput('tier 范围 0-9（与远古版一致）', 'error'); return; }
+              setSettings(s => ({ ...s, tier: val }));
+              addOutput(`» expansion tier = ${val} (${tierName(val)})`, 'info');
+            } else if (key === 'font' || key === 'font_size') {
+              if (val < 10 || val > 28) { addOutput('font 范围 10-28（默认 16）', 'error'); return; }
+              setSettings(s => ({ ...s, fontSize: val }));
+              addOutput(`» font size = ${val} (${Math.round((val / 16) * 100)}%)`, 'info');
+            } else {
+              addOutput(`未知设置: ${key}`, 'error');
+            }
+          }
+          return;
+        }
+        default:
+          addOutput(`未知命令: ${raw}`, 'error');
+          return;
+      }
+    }
+
+    // —— 其余输入：一律视为 tree 指令的缩写（任何输入都是指令）——
+    handleTreeCommand(raw);
+  }, [input, addOutput, handleSaveCommand, handleTreeCommand, handleDrawCommand, handleImportCommand]);
 
   // ==========================================================================
   //  键盘事件
@@ -590,6 +841,19 @@ function App() {
   // ==========================================================================
   //  渲染
   // ==========================================================================
+  //  折叠按钮样式（tree / draw 标题行左侧，▾ 展开 / ▸ 折叠）
+  const collapseBtnStyle = {
+    background: "transparent",
+    border: `1px solid ${theme.border}`,
+    color: theme.fg,
+    borderRadius: 3,
+    padding: "0 5px",
+    fontSize: 12,
+    lineHeight: "1.3",
+    cursor: "pointer",
+    fontFamily: "inherit",
+  };
+
   const renderItems = items.map((item) => {
     if (item.type === 'output') {
       let color = theme.logColor;
@@ -610,6 +874,13 @@ function App() {
         React.createElement(FolderView, {
           categories: item.categories,
           theme,
+          // 双击记号行 → 直接按该记号示例建树（等价输入该记号名）
+          onNotationDoubleClick: (nid) => {
+            handleTreeCommand(nid);
+            setTimeout(() => {
+              if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }, 0);
+          },
         })
       );
     }
@@ -640,6 +911,11 @@ function App() {
             display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap"
           }
         },
+          React.createElement("button", {
+            onClick: () => toggleItemCollapse(item.id),
+            title: item.collapsed ? '展开这棵树' : '把树收成一行',
+            style: collapseBtnStyle,
+          }, item.collapsed ? '▸' : '▾'),
           React.createElement("span", null, `--- 树 #${item.treeIndex + 1} (${item.name}) ---`),
           views.length > 1 && views.map((v) => React.createElement("button", {
             key: v.id === undefined ? 'native' : v.id,
@@ -649,7 +925,7 @@ function App() {
             style: btnStyle(v.id === currentView),
           }, `显示为${v.label}`))
         ),
-        React.createElement(TreeNodeView, {
+        item.collapsed ? null : React.createElement(TreeNodeView, {
           key: `tree-${item.id}`,
           rootList: item.rootList,
           notation: item.notation,
@@ -669,12 +945,55 @@ function App() {
         })
       );
     }
+    if (item.type === 'draw') {
+      // 独立指令 draw 产出的图案（Y 山脉图 / IBLP 图案；Canvas + HTML 叠文本）
+      const equivLabel = item.equiv ? ` · ${item.equiv}` : '';
+      const zoom = item.zoom || 1;
+      return React.createElement("div", {
+        key: `draw-wrapper-${item.id}`,
+        style: { marginTop: 4 }
+      },
+        React.createElement("div", {
+          style: {
+            color: theme.fgMuted, fontSize: 13, marginBottom: 2,
+            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap"
+          }
+        },
+          React.createElement("button", {
+            onClick: () => toggleItemCollapse(item.id),
+            title: item.collapsed ? '展开这张图' : '把图收成一行',
+            style: collapseBtnStyle,
+          }, item.collapsed ? '▸' : '▾'),
+          React.createElement("span", null, `--- ${item.label} (${item.exprText}${equivLabel}) ---`),
+          // 放大 / 缩小（×1.5 步进，钳制 0.5x~8x）
+          React.createElement("button", {
+            onClick: () => setItemZoom(item.id, zoom / 1.5),
+            title: '缩小',
+            style: { ...collapseBtnStyle, minWidth: 22, padding: "0 3px" },
+          }, "－"),
+          React.createElement("span", { style: { fontSize: 12 } }, `${Math.round(zoom * 100)}%`),
+          React.createElement("button", {
+            onClick: () => setItemZoom(item.id, zoom * 1.5),
+            title: '放大',
+            style: { ...collapseBtnStyle, minWidth: 22, padding: "0 3px" },
+          }, "＋")
+        ),
+        item.collapsed ? null : React.createElement(MountainView, {
+          diagram: item.diagram,
+          theme,
+          scale: zoom,
+        })
+      );
+    }
     return null;
   });
 
   // ==========================================================================
   //  主渲染
   // ==========================================================================
+  // 整体字体缩放系数（设置里的 font_size，默认 16 → zoom=1 不缩放）
+  const fontZoom = settings.fontSize / 16;
+
   return React.createElement(
     "div", {
       ref: containerRef,
@@ -683,7 +1002,14 @@ function App() {
       style: {
         background: theme.bg,
         color: theme.fg,
-        height: "100vh",
+        // 整体字体缩放（设置里的 font_size）：transform scale 从左上角缩放。
+        // 布局尺寸补偿为 100vw/fontZoom × 100vh/fontZoom，渲染后恰好等于视口 ——
+        // 放大无白边、缩小无页面滚动条，始终适配窗口。
+        // 默认 16 → fontZoom=1 → scale(1) 无变化。
+        width: `calc(100vw / ${fontZoom})`,
+        height: `calc(100vh / ${fontZoom})`,
+        transform: `scale(${fontZoom})`,
+        transformOrigin: "0 0",
         fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace",
         fontSize: 16,
         display: "flex",
@@ -712,7 +1038,7 @@ function App() {
       }
     },
       React.createElement("span", { style: { fontWeight: 700, fontSize: 18, color: theme.accent } },
-        "序数探索器 · Transfinite-Ordinals-Explorer · v2.4.0"
+        "序数探索器 · Transfinite-Ordinals-Explorer · v2.4.2"
       ),
       React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("span", { style: { fontSize: 12, color: theme.settingColor } },
@@ -837,6 +1163,7 @@ function App() {
             { key: 'default_expand', label: 'default_expand', get: s => s.defaultExpand, set: (s, v) => ({ ...s, defaultExpand: v }), min: 1, max: 100, stepper: true },
             { key: 'additional_expand', label: 'additional_expand', get: s => s.additionalExpand, set: (s, v) => ({ ...s, additionalExpand: v }), min: 0, max: 100, stepper: true },
             { key: 'tier', label: 'tier', get: s => s.tier, set: (s, v) => ({ ...s, tier: v }), min: 0, max: 9, stepper: true, named: true },
+            { key: 'font', label: 'font_size', get: s => s.fontSize, set: (s, v) => ({ ...s, fontSize: v }), min: 10, max: 28, stepper: true },
           ].map(cfg => {
             const rowStyle = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 };
             const labelEl = React.createElement("span", { style: { color: theme.fgDim, fontSize: 14 } }, cfg.label);

@@ -2,6 +2,73 @@
 
 从 v2.2.2 开始记录。
 
+## v2.4.2（2026-09-03）
+
+### 新增：分析导入（`import`）+ xlsx 导出
+
+- **`import`**：从 `.xlsx` / `.csv` 还原成一棵树（重建后放进输出流）。
+  - `import` 用**最后一棵树的记号**解析；`import <记号名>`（如 `import bm4`）用指定记号。
+  - 仅支持「能解析回表达式」的记号（`register.js` 里配了 `parse` 的序列类 PS / 矩阵类 PM，
+    以及记号自带 `parse` 的如 PrSS）；其余（OCF/DEN/TON/MN/aSAN 等只支持 limit 建树）
+    报「该记号暂不支持导入」，并把无法解析的表达式逐行列出，不静默丢数据。
+  - CSV 按现有 `save`(csv) 的输出互读；`Limit` 行（极限根）作为已知边界报「不支持」。
+- **`save` 格式参数**：`save xlsx [n]` / `save csv [n]`（默认 csv），与 import 对称。
+  - 新增**注释过滤参数**：`save ... True` 连无注释的行一起导出；默认 `False` 只导出有注释的行。
+  - xlsx 读写库（`read-excel-file` / `write-excel-file`）按需从 esm.sh 动态加载，保持零构建；
+    加载失败（离线）时提示需要联网。
+- 实现：`core/importer.js`（读取 + 解析 + 重建树）；`ui/exportUtils.js` 增 `downloadTreeAsXLSX`；
+  `ui/commandParser.js` / `ui/app.js` 接线 `import`；帮助文本与 README 同步。
+
+## v2.4.1（2026-09-02）
+
+### 新增：带 n 家族记号移植（ne-rewritten generator 家族，+83 记号 → 共 168）
+
+移植 5 组「带 n 可调」记号家族到 `notation/rewritten/`（算法逐行移植自
+ne-rewritten，全部依赖 `shared.js` 的 `window.NEUTILS`）：
+
+| 家族 | 文件 | 注册 id |
+|---|---|---|
+| n-MN（non triangular nMN） | `n-MN.js` | `1-mn`..`8-mn`（n=1..） |
+| nBM-BHM（BMS(n rows)+BHM） | `nBM-BHM.js` | `1-bm-bhm`..`8-bm-bhm` |
+| (>n)-UPMS（partial UPMS） | `partial-UPMS.js` | `upms-partial-2`..`9`（官方 n≥2） |
+| -1Y-nSS 主系列（M/T/BT） | `minus1Y-nSS.js` / `t-minus1Y-nSS.js` / `bt-minus1Y-nSS.js` | `-1y-1ss`..`6ss` 等 |
+| -1Y-nSS star 系列（BT*/v2/v3/BTL） | `btstar-minus1Y-nSS.js` / `-v2` / `-v3` / `btl-minus1Y-nSS.js` | `bt*--1y-2ss`..（v2 带尾撇、v3 带 `-v3`、BTL 用 `btl-` 前缀） |
+| GMS（General Matrix System） | `GMS.js` | `BMS-2026…-{GBMS\|UPMS\|LPMS2}-{omega-P\|pQSS\|QSS\|Full\|Weirdly Full}` 15 个 + `-n-{2\|3}-P` 6 个 |
+
+**n 按需生成机制（支持到 100）**：
+- 家族文件把工厂注册到 `window.NOTATION_FAMILIES`（`family/label/start/max/match/idFor/ensure`）；
+  静态只预注册常用小档（如 n-MN 1..8），输入任意档（如 `30MN`）由
+  `core/register.js` 的 `resolveFamilyInput` 命中后**现场实例化并注册**（幂等）。
+- 输入解析（`ui/notationParser.js`）家族优先，避免 `-1y` 吃掉 `-1y-30ss` 前缀。
+- **n 上限 100**：超过报「不支持超过 100」（如 `101MN`）；低于家族起点报「从 X 开始」
+  （UPMS/GMS n-P 从 2 起）。
+
+**基础设施**：`shared.js`(NEUTILS) 补 `bind1`/`bind3`、`BM_compare`/`BM_is_limit`/
+`BM_infinity_FS`/`BM_expand`，并导出漏掉的 `BM_parents`。
+
+**接线**：`core/notation-manifest.js` 新增 10 个文件条目（82 条目）；
+`ui/notationList.js` 新增 GMS 分类与家族显示名；README / DESIGN 同步。
+
+### 指令与交互迭代
+
+- **任何输入都是指令**：新增 `tree`（生成展开树；裸输入 `PrSS 0,1,2` 是它的缩写）、
+  `draw`（绘制图案：Y 序列山脉图 + **IBLP/DEN2 点线图**，`(行)L` 结构自动识别；
+  IBLP 画法移植自 ne-rewritten `DEN2.ts`，根条目红点、`*` 标记实心、灰字步长）；
+  旧名 `mountain` 保留为别名。
+- 图案/树输出块可**折叠成一行**（`▾/▸`）；图案可**放大缩小**（`－ 100% ＋`，
+  0.5x–8x）；`draw` 图案去内滚动条、完整显示。
+- ⚙️ 设置新增 **font_size**（10–28，默认 16）：根容器 `transform: scale` + 尺寸补偿，
+  放大无白边、缩小无页面滚动条，始终适配窗口。
+- `/list` 中带 n 家族收成**子文件夹**：显示前 3 档 + 省略号（更多档位直接输入即生成）；
+  「已注册 N 个记号」每个家族按 1 个计；**双击记号行直接按示例建树**。
+- 本条目为 v2.4.0 后的累计开发，随 v2.4.1 发布。
+
+### 验证
+- `node scripts/list-notation.mjs`：82/82 条目加载成功，共注册 168 个记号。
+- `node scripts/verify-loader.mjs`：71 断言通过；`node scripts/test-convert.mjs`：12 通过。
+- 各家族子代理自测：n-MN 220 断言、nBM-BHM/partial-UPMS 732、nSS 主系列 346、
+  v3/BTL 212、GMS 693，全部 0 失败；家族动态 n 行为测试 27 项断言通过。
+
 ## v2.4.0（2026-09-01）
 
 ### 项目整理（深度：目录规范 + 清单驱动加载）

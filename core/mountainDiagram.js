@@ -1,10 +1,9 @@
 // ============================================================================
 //  core/mountainDiagram.js — ω-Y 山脉图数据层（移植自 ne-rewritten）
 // ============================================================================
-//  ⚠ 暂未启用（2026-09-01 用户要求暂时移除 UI 接入；代码保留待后续启用）：
-//    启用时在 NOTATION_META views 加 { kind: 'mountain' } 条目、
-//    converters.js 恢复 VIEW_DISPLAY_MAKERS['mountain'] 与 isMountain 标记、
-//    app.js 恢复 ui/MountainView.js 渲染。
+//  2026-09-01 曾按用户要求暂时移除 UI 接入；2026-09-02 起通过独立指令
+//  `mountain <Y序列> [模式]` 启用（ui/app.js 的 handleMountainCommand 消费
+//  omegaY_diagram），不与树标题视图按钮并列。
 // ============================================================================
 //  移植自 SmileLee-lyx/ne-rewritten：
 //    src/notations/Y/Omega_Y.ts（compute_y_mountain_diagram / vertical_display_html）

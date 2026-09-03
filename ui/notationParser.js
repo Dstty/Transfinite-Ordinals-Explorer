@@ -11,7 +11,7 @@
 //  表达式本身由各记号的 parse 解析（记号自带 parse > NOTATION_META.parse），
 //  通用解析器见 core/parseShorthands.js。
 // ============================================================================
-import { buildNameMap } from '../core/register.js';
+import { buildNameMap, resolveFamilyInput } from '../core/register.js';
 
 // 预构建 小写输入 → 记号 id 映射
 const nameMap = buildNameMap();
@@ -74,6 +74,18 @@ export function parseNotation(input) {
   //            所以 "NOCF (EBO)" 与 "nocf(ebo)" 是同一个输入） ----------
   const normalized = trimmed.replace(/ω/g, 'w').replace(/，/g, ',').replace(/\s+/g, '');
   const lower = normalized.toLowerCase();
+
+  // ---------- 第 2.5 步：家族输入（带 n 可调，如 30MN / upms50 / -1y-30ss）----------
+  // 优先于普通匹配：避免 -1y 之类的记号把 "-1y-30ss" 前缀吃掉；且保证
+  // "30-mn" 与已静态注册的 "3-mn" 走同一条路径（家族 ensure 幂等）。
+  const fam = resolveFamilyInput(lower);
+  if (fam) {
+    const famRest = fam.rest;
+    if (famRest === '' || /^(\(limit\)|limit)$/i.test(famRest)) {
+      return { notationId: fam.notationId, notationName: fam.notationName, kind: 'limit' };
+    }
+    return { notationId: fam.notationId, notationName: fam.notationName, kind: 'expr', expr: famRest };
+  }
 
   // ---------- 第三步：匹配记号名（id / name / alias，最长匹配） ----------
   // 纯最长匹配：候选里谁前缀最长谁赢，保证 "NOCF(EBO)" 整体匹配而不是只吃掉 "NOCF"

@@ -71,8 +71,14 @@
       return 0;
     };
   }
+  function bind1(fn, t1) {
+    return (...rest) => fn(t1, ...rest);
+  }
   function bind2(fn, t2) {
     return (a) => fn(a, t2);
+  }
+  function bind3(fn, t3) {
+    return (t1, t2, ...rest) => fn(t1, t2, t3, ...rest);
   }
   function index_of_first(array, predicate) {
     for (let i = 0; i < array.length; i++) {
@@ -511,6 +517,64 @@
         }
         if (p !== undefined) result[i].push(p);
         else break;
+      }
+    }
+    return result;
+  }
+  // --- BM 核心（来自 ne-rewritten BM.ts；供 nBM-BHM / partial-UPMS / GMS 移植用） ---
+  function BM_compare(a, b) {
+    if (BM_is_infinity(a) || BM_is_infinity(b)) {
+      return boolean_compare(BM_is_infinity(a), BM_is_infinity(b));
+    }
+    return lex_compare(a, b, (x, y) => lex_compare(BM_normalize_col(x), BM_normalize_col(y), number_compare));
+  }
+  function BM_is_limit(a) {
+    return BM_is_infinity(a) || (a.length > 0 && a[a.length - 1].length > 0 && a[a.length - 1][0] > 0);
+  }
+  function BM_infinity_FS(n) {
+    return [[], Array.from({ length: n + 1 }, () => 1)];
+  }
+  function BM_ascending_threshold(P, r, j_max) {
+    const result = [];
+    result[r] = j_max;
+    for (let i = r + 1; i < P.length; i++) {
+      let result_i;
+      for (let j = 0; j < j_max; j++) {
+        const pij = P[i][j];
+        if (pij === undefined || pij < r || j >= result[pij]) {
+          result_i = j;
+          break;
+        }
+      }
+      result[i] = result_i ?? j_max;
+    }
+    return result;
+  }
+  function BM_expand(m, index, shorter) {
+    if (m.length === 0) return m;
+    const rightmost = m.length - 1;
+    const col_last = m[rightmost];
+    let topmost = col_last.length - 1;
+    for (; topmost >= 0; --topmost) {
+      if (col_last[topmost] > 0) break;
+    }
+    let result = m.slice(0, rightmost);
+    if (topmost < 0) return result;
+    const P = BM_parents(m);
+    const r = P[rightmost][topmost];
+    const A = BM_ascending_threshold(P, r, topmost);
+    const col_r = m[r];
+    const offset = Array.from({ length: topmost }, (_, j) => col_last[j] - (col_r[j] ?? 0));
+    for (let w = 1; w <= index + 1; ++w) {
+      if (shorter && w === index + 1) break;
+      for (let i = r; i < rightmost; ++i) {
+        result.push(
+          Array.from({ length: Math.max(m[i].length, A[i]) }, (_, y) => {
+            const val = m[i][y] ?? 0;
+            return y < A[i] ? val + offset[y] * w : val;
+          }),
+        );
+        if (w === index + 1) break;
       }
     }
     return result;
@@ -1004,7 +1068,9 @@
     tuple_lex_compare,
     tuple_lex_compare_by,
     object_lex_compare_by,
+    bind1,
     bind2,
+    bind3,
     index_of_first,
     index_of_last,
     deepcopy,
@@ -1020,6 +1086,11 @@
     sequence_from_display,
     BM_INFINITY,
     BM_is_infinity,
+    BM_parents,
+    BM_compare,
+    BM_is_limit,
+    BM_infinity_FS,
+    BM_expand,
     BM_normalize_col,
     BM_normalize,
     BM_standardize,
