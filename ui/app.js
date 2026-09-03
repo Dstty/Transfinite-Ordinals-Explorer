@@ -12,6 +12,7 @@ import { FolderView } from './FolderView.js';
 import { MountainView } from './MountainView.js';
 import { parseNotation } from './notationParser.js';
 import { parseCommand } from './commandParser.js';
+import { analyzeInput } from './completion.js';
 import { downloadTreeAsCSV, downloadTreeAsXLSX } from './exportUtils.js';
 import { parseImportFile, buildImportTree } from '../core/importer.js';
 import { expandNode, deepClone } from '../core/engine.js';
@@ -120,12 +121,51 @@ function App() {
   const [editingNote, setEditingNote] = React.useState(null);
   const [showSettings, setShowSettings] = React.useState(false);
   const [version, setVersion] = React.useState(0);       // 树是可变对象，用它强制重渲染
+  // —— 命令补全：当前输入的分析结果 + 下拉高亮项（Tab/回车/↑↓ 交互）——
+  const [selIdx, setSelIdx] = React.useState(0);
+  const [dismissed, setDismissed] = React.useState(false); // Esc 收起下拉后，输入变化前不再显示
 
   const scrollRef = React.useRef(null);
   const inputRef = React.useRef(null);
   const containerRef = React.useRef(null);
+  // 归一化改写 value 后光标会被重置到末尾；用这个 ref 暂存目标光标位置，渲染后还原
+  const pendingCaretRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (pendingCaretRef.current !== null && inputRef.current) {
+      const c = pendingCaretRef.current;
+      pendingCaretRef.current = null;
+      inputRef.current.setSelectionRange(c, c);
+    }
+  });
 
   const theme = THEMES[themeKey];
+
+  // —— 命令补全：随输入变化重算（只读幂等），供预览 + 下拉候选使用 ——
+  const analysis = React.useMemo(() => analyzeInput(input), [input]);
+  const suggestions = analysis.suggestions;
+  const inputFormat = analysis.format;
+  // 下拉是否展示：有候选且未被 Esc 收起
+  const showSuggestions = suggestions.length > 0 && !dismissed;
+  // 下拉高亮项（钳制到有效范围）
+  const safeSelIdx = suggestions.length ? Math.min(selIdx, suggestions.length - 1) : 0;
+
+  // 选中补全项：填入输入框并收起下拉（保持焦点在输入框）
+  const acceptSuggestion = React.useCallback((sug) => {
+    const s = sug || suggestions[selIdx] || suggestions[0];
+    if (!s) return;
+    setInput(s.insert);
+    setSelIdx(0);
+    setDismissed(false);
+    inputRef.current?.focus();
+  }, [suggestions, selIdx]);
+
+  // 下拉出现时滚动到底部，确保候选可见（输入框位于滚动区末尾）
+  React.useEffect(() => {
+    if (suggestions.length > 0 && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [suggestions.length]);
 
   // ----- 输出流 -----
   const addOutput = React.useCallback((message, type = 'info') => {
@@ -903,12 +943,13 @@ function App() {
       });
       return React.createElement("div", {
         key: `tree-wrapper-${item.id}`,
-        style: { marginTop: 4 }
+        style: { marginTop: 4, border: `1px solid ${theme.border}`, borderRadius: 4, overflow: "hidden" }
       },
         React.createElement("div", {
           style: {
-            color: theme.fgMuted, fontSize: 13, marginBottom: 2,
-            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap"
+            color: theme.fgMuted, fontSize: 13,
+            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+            background: theme.highlight, padding: "3px 8px", borderBottom: `1px solid ${theme.border}`
           }
         },
           React.createElement("button", {
@@ -925,24 +966,26 @@ function App() {
             style: btnStyle(v.id === currentView),
           }, `显示为${v.label}`))
         ),
-        item.collapsed ? null : React.createElement(TreeNodeView, {
-          key: `tree-${item.id}`,
-          rootList: item.rootList,
-          notation: item.notation,
-          displayFn,
-          treeIndex: item.treeIndex,
-          theme,
-          focusUid: focusedItem?.type === 'node' && focusedItem.treeIndex === item.treeIndex ? focusedItem.uid : null,
-          onToggle,
-          onMore,
-          startNote,
-          editingNote,
-          saveNote,
-          cancelNoteEditing,
-          onFocusRow,
-          onNoteCommitted,
-          onRefresh: refreshUI,
-        })
+        item.collapsed ? null : React.createElement("div", { style: { padding: "2px 8px 6px" } },
+          React.createElement(TreeNodeView, {
+            key: `tree-${item.id}`,
+            rootList: item.rootList,
+            notation: item.notation,
+            displayFn,
+            treeIndex: item.treeIndex,
+            theme,
+            focusUid: focusedItem?.type === 'node' && focusedItem.treeIndex === item.treeIndex ? focusedItem.uid : null,
+            onToggle,
+            onMore,
+            startNote,
+            editingNote,
+            saveNote,
+            cancelNoteEditing,
+            onFocusRow,
+            onNoteCommitted,
+            onRefresh: refreshUI,
+          })
+        )
       );
     }
     if (item.type === 'draw') {
@@ -951,12 +994,13 @@ function App() {
       const zoom = item.zoom || 1;
       return React.createElement("div", {
         key: `draw-wrapper-${item.id}`,
-        style: { marginTop: 4 }
+        style: { marginTop: 4, border: `1px solid ${theme.border}`, borderRadius: 4, overflow: "hidden" }
       },
         React.createElement("div", {
           style: {
-            color: theme.fgMuted, fontSize: 13, marginBottom: 2,
-            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap"
+            color: theme.fgMuted, fontSize: 13,
+            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+            background: theme.highlight, padding: "3px 8px", borderBottom: `1px solid ${theme.border}`
           }
         },
           React.createElement("button", {
@@ -1038,7 +1082,7 @@ function App() {
       }
     },
       React.createElement("span", { style: { fontWeight: 700, fontSize: 18, color: theme.accent } },
-        "序数探索器 · Transfinite-Ordinals-Explorer · v2.4.2"
+        "序数探索器 · Transfinite-Ordinals-Explorer · v2.4.3"
       ),
       React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("span", { style: { fontSize: 12, color: theme.settingColor } },
@@ -1089,19 +1133,52 @@ function App() {
               ref: inputRef,
               value: input,
               onChange: (e) => {
-                // 输入法组合(composition)进行中绝不改写 value：
-                // 此时修改受控值会和 IME 的内部文本状态打架，导致字符重复/丢失
-                if (e.nativeEvent.isComposing) return;
-                setInput(normalizePunct(e.target.value));
+                const raw = e.target.value;
+                // 输入法组合(composition)进行中：只同步 state（原始值）到 DOM，不归一化、不改写，
+                // 否则受控值跟 DOM 不同步会把输入法组合中的文字当成退格清掉。
+                if (e.nativeEvent.isComposing) {
+                  setInput(raw);
+                  setSelIdx(0);
+                  setDismissed(false);
+                  return;
+                }
+                // 非组合：把全角标点归一化为半角，并保持光标（改写 value 会把光标重置到末尾）
+                const norm = normalizePunct(raw);
+                if (norm !== raw) {
+                  pendingCaretRef.current = e.target.selectionStart ?? norm.length;
+                  setInput(norm);
+                } else {
+                  setInput(raw);
+                }
+                setSelIdx(0);
+                setDismissed(false);
               },
               onCompositionEnd: (e) => {
-                // 组合结束：把这次由输入法提交进来的中文标点归一半角
-                setInput(normalizePunct(e.target.value));
+                // 组合结束：把提交进来的全角标点归一半角，并保持光标
+                const raw = e.target.value;
+                const norm = normalizePunct(raw);
+                if (norm !== raw) {
+                  pendingCaretRef.current = e.target.selectionStart ?? norm.length;
+                  setInput(norm);
+                } else {
+                  setInput(raw);
+                }
+                setSelIdx(0);
+                setDismissed(false);
               },
               onKeyDown: (e) => {
-                if (e.key === "Enter") { handleSubmit(); e.stopPropagation(); }
+                // —— 补全下拉打开时的键控：↑↓ 选择、Tab 补全、Esc 收起；回车始终执行 ——
+                if (showSuggestions) {
+                  if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setSelIdx(i => (i + 1) % suggestions.length); return; }
+                  if (e.key === 'ArrowUp')   { e.preventDefault(); e.stopPropagation(); setSelIdx(i => (i - 1 + suggestions.length) % suggestions.length); return; }
+                  if (e.key === 'Tab')       { e.preventDefault(); e.stopPropagation(); acceptSuggestion(); return; }
+                  if (e.key === 'Escape')    { e.preventDefault(); e.stopPropagation(); setSelIdx(0); setDismissed(true); return; }
+                }
+                // 回车始终执行当前输入（与「任何输入都是指令」一致）；补全靠 Tab
+                if (e.key === 'Enter') { handleSubmit(); e.stopPropagation(); }
               },
-              onFocus: () => setFocusIdx(navItems.length - 1),
+              onFocus: () => { setFocusIdx(navItems.length - 1); setDismissed(false); },
+              onBlur: () => setDismissed(true),
               placeholder: `输入 记号名 表达式，如 PrSS 0,1,2；或直接输入记号名用示例建树`,
               autoFocus: true,
               style: {
@@ -1116,6 +1193,57 @@ function App() {
               }
             }
           )
+        ),
+        // —— 命令补全下拉 ——
+        showSuggestions && React.createElement("div", {
+          style: {
+            border: `1px solid ${theme.border}`,
+            borderRadius: 4,
+            background: theme.bg,
+            boxShadow: "0 4px 14px rgba(0,0,0,0.3)",
+            maxHeight: 220,
+            overflowY: "auto",
+            marginTop: 4
+          }
+        },
+          // 面板内的格式说明（例如 save [csv|xlsx] [n] [True|False]），并非独立预览行
+          inputFormat && React.createElement("div", {
+            style: {
+              padding: "3px 8px",
+              fontSize: 12,
+              color: theme.fgDim,
+              borderBottom: `1px solid ${theme.border}`,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis"
+            }
+          }, inputFormat),
+          suggestions.map((s, i) => {
+            const active = i === safeSelIdx;
+            // 悬停/选中用更亮的 noteColor + 加粗 + 高亮；平时指令用主题蓝 accent、记号名用 fg、识别结果用灰
+            const labelColor = active
+              ? theme.noteColor
+              : (s.type === 'notation' ? theme.fg : (s.type === 'info' ? theme.fgDim : theme.accent));
+            return React.createElement("div", {
+              key: `${s.type}-${s.label}-${i}`,
+              onMouseDown: (e) => { e.preventDefault(); acceptSuggestion(s); },
+              onMouseEnter: () => setSelIdx(i),
+              style: {
+                display: "flex",
+                alignItems: "baseline",
+                gap: 10,
+                padding: "2px 8px",
+                fontSize: 14,
+                cursor: "pointer",
+                background: active ? theme.highlight : "transparent",
+                color: theme.fg,
+                fontWeight: active ? 700 : 400
+              }
+            },
+              React.createElement("span", { style: { color: labelColor, whiteSpace: "nowrap" } }, s.label),
+              React.createElement("span", { style: { color: theme.fgDim, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, s.hint)
+            );
+          })
         )
       )
     ),
@@ -1132,7 +1260,7 @@ function App() {
         flexShrink: 0
       }
     },
-      "↑↓导航 · →展开/+=更多 · ←/-折叠 · , 父节点 · 0-9 选中 FS[n] · n 注释 · Esc 取消 · help 帮助 · list 记号 · save 导出"
+      "Tab 补全 · ↑↓导航 · →展开/+=更多 · ←/-折叠 · , 父节点 · 0-9 选中 FS[n] · n 注释 · Esc 取消 · help 帮助 · list 记号 · save 导出"
     ),
     // —— 设置弹窗 ——
     showSettings && React.createElement("div", {

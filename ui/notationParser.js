@@ -30,9 +30,9 @@ function inferNotationByFormat(normalized) {
     return { notationId: 'omega-y', notationName: 'ω-Y sequence' };
   }
 
-  // 2. 括号包裹的数字序列（如 ()(1,1,1)(2,1)(1,1,1)）→ BMS
-  // 支持可选的前导空括号 ()，然后是一个或多个括号组
-  if (/^\(\)?(\(\d+(,\d+)*\))+$/.test(normalized)) {
+  // 2. 括号包裹的数字序列（如 ()(1,1,1)(2,1) 或 (0)(1,1)）→ BMS
+  //    可选的前导空括号 ()，然后是一个或多个括号组
+  if (/^(?:\(\))?(?:\(\d+(?:,\d+)*\))+$/.test(normalized)) {
     return { notationId: 'bm4', notationName: 'BMS (BM4)' };
   }
 
