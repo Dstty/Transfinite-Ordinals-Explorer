@@ -497,6 +497,7 @@ const draw_diagram_control = {
 
 export const S_omega_pow_omega_MN = {
     id: 's-omega-pow-omega-mn',
+    aliases: ["S-omega^omega-MN","S-omega^omega-mn","S_omega_pow_omega_MN"],   // ner-rewritten 里的拼法
     name: "Smile's ω^ω MN",
     simple_name: 'Sω^ωMN',
     category_id: 'category-smile-mn',

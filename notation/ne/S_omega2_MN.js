@@ -445,6 +445,7 @@ const draw_diagram_control = {
 
 export const S_omega2_MN = {
     id: 's-omega2-mn',
+    aliases: ["S-omega2-MN","S-omega2-mn"],   // ner-rewritten 里的拼法
     name: "Smile's ω2 MN",
     simple_name: 'Sω2MN',
     category_id: 'category-smile-mn',

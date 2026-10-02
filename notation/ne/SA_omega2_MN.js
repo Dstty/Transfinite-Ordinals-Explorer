@@ -308,6 +308,7 @@ function mountain_display_marked(m, type) {
 
 export const SA_omega2_MN = {
     id: 'sa-omega2-mn',
+    aliases: ["SA-omega2-MN","SA-omega2-mn"],   // ner-rewritten 里的拼法
     name: "Smile's Astral ω2 MN",
     simple_name: 'SAω2MN',
     category_id: 'category-smile-mn',
