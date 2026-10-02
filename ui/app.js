@@ -690,6 +690,8 @@ const handleTreeCommand = React.useCallback((arg) => {
     }
   try {
       const parsed = parseNotation(text);
+      // 家族名（如 rel BnSS）会带一句提示，说明取了第几档、怎么写指定档位
+      if (parsed.notice) addOutput(parsed.notice, 'info');
       const notation = getNotation(parsed.notationId);
       if (!notation) throw new Error(`记号不存在: ${parsed.notationId}`);
 

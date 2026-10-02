@@ -11,7 +11,7 @@
 //  表达式本身由各记号的 parse 解析（记号自带 parse > NOTATION_META.parse），
 //  通用解析器见 core/parseShorthands.js。
 // ============================================================================
-import { buildNameMap, getNotation } from '../core/ne/uiBridge.js';
+import { buildNameMap, getNotation, getAllNotations } from '../core/ne/uiBridge.js';
 import { resolveFamilyInput } from '../core/register.js';
 import { resolve_ne_family_input } from '../core/ne/familyInput.js';
 import { on_registry_change } from '../core/ne/registry.js';
@@ -67,6 +67,36 @@ function normalizeVeblen(text) {
  * @param {string} normalized 标准化后的输入（已去空格、全角转半角）
  * @returns {{ notationId: string, notationName: string } | null}
  */
+// 家族名（rel BnSS / abs BnSS / ATnSS / BT*nSS ...）的识别与默认档。
+// 这类写法里的 n 是档位占位，本身不是可注册记号；直接报「无效输入」没人看得懂。
+// 家族名来源：家族各档显示名形如 "rel B1SS"，把数字换成 n 即家族名。
+function family_name_notice(lower) {
+  if (!/n/.test(lower)) return null;
+  let all;
+  try { all = getAllNotations(); } catch { return null; }
+  for (const n of all) {
+    const name = String(n.name || '');
+    if (!/\d/.test(name)) continue;
+    if (name.replace(/\d+/g, 'n').toLowerCase().replace(/\s+/g, '') !== lower) continue;
+    const d = n._def || n;
+    return { categoryId: d.category_id || '', template: name.replace(/\d+/g, 'n'), sample: name, id: String(n.id) };
+  }
+  return null;
+}
+function family_default_member(categoryId) {
+  let all;
+  try { all = getAllNotations(); } catch { return null; }
+  const members = all.filter((n) => categoryId && (n._def || n).category_id === categoryId);
+  if (!members.length) return null;
+  const num = (x) => {
+    const m = String(x.id).match(/(\d+)\s*ss$/i);
+    return m ? Number(m[1]) : 9999;
+  };
+  members.sort((a, b) => num(a) - num(b));
+  return members[0];
+}
+
+
 function inferNotationByFormat(normalized) {
   // 1. 纯数字+逗号（如 1,3,4,2,5,8）→ ω-Y
   if (/^(\d+,)+\d+$/.test(normalized)) {
@@ -159,14 +189,37 @@ export function parseNotation(input) {
   // 规则：记号名后面必须是 结尾 / 空白 / 左括号，才算「真的是记号名」。
   const rawLower = trimmed.replace(/ω/g, 'w').replace(/，/g, ',').toLowerCase();
   const boundaryOk = (name) => {
-    if (!rawLower.startsWith(name)) return false;
-    const after = rawLower.slice(name.length);
-    if (after === '') return true;
-    return /^[\s(（]/.test(after);
+    const raw = String(name).toLowerCase();
+    const nm = raw.replace(/\s+/g, '');
+    // ① 按原始写法（保留空格）判边界，其后必须是 结尾 / 空白 / 左括号
+    if (rawLower.startsWith(raw)) {
+      const after = rawLower.slice(raw.length);
+      if (after === '' || /^[\s(（]/.test(after)) return true;
+    }
+    // ② 去空格后完全相等：如输入 "rel B1SS" 命中名字 "rel B1SS"
+    if (lower === nm) return true;
+    // ③ 去空格后是前缀，且其后是左括号；名字本身含空格时，后面接字母数字也算边界
+    //    （"rel B1SS" 这种名字去空格后是 relb1ss，后面接别的段就该让更长的名字赢）
+    if (lower.startsWith(nm)) {
+      const after = lower.slice(nm.length);
+      if (after === '' || /^[（(]/.test(after)) return true;
+      if (/\s/.test(raw) && /^[a-z0-9]/.test(after)) return true;
+    }
+    return false;
   };
-  const matched = candidates
+  let matched = candidates
     .filter(c => lower.startsWith(c) && boundaryOk(c))
     .sort((a, b) => b.length - a.length);
+  // 家族档位是运行时水合出来的，名字索引可能建在水合之前 → 查不到时重建一次再试。
+  // 少了这一步，"rel B2SS" 这类档位名永远输不进来（用户实测）。
+  if (matched.length === 0) {
+    _nameMap = null;
+    _candidates = null;
+    const fresh = name_index();
+    matched = fresh.candidates
+      .filter((c) => lower.startsWith(c) && boundaryOk(c))
+      .sort((a, b) => b.length - a.length);
+  }
 
   let notationId, notationName, rest;
 
@@ -174,6 +227,22 @@ export function parseNotation(input) {
     // 没匹配到记号名 → 根据格式自动推断
     const inferred = inferNotationByFormat(normalized);
     if (!inferred) {
+      // 家族名（rel BnSS / abs BnSS / ATnSS ...）→ 给提示并取第 1 档
+      const famNotice = family_name_notice(lower);
+      if (famNotice) {
+        const member = family_default_member(famNotice.categoryId);
+        if (member) {
+          const d0 = String(famNotice.sample).match(/\d+/);
+          const n0 = d0 ? d0[0] : '1';
+          return {
+            notationId: String(member.id),
+            notationName: member.name || String(member.id),
+            kind: 'limit',
+            notice: '「' + famNotice.template + '」是记号家族（n 是档位占位），已取第 ' + n0 + ' 档：'
+              + famNotice.sample + '。要指定档位就把 n 换成数字，例如 ' + famNotice.template.replace(/n/i, '2') + '。',
+          };
+        }
+      }
       throw new Error('无效输入：不是已注册记号表达式。输入 /list 查看可用记号');
     }
     notationId = inferred.notationId;
