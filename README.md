@@ -1,6 +1,6 @@
 # 序数探索器 · Transfinite-Ordinals-Explorer
 
-googology 超限序数记号探索工具（**v2.5.1**）：输入「记号名 + 表达式」，生成**展开树**，
+googology 超限序数记号探索工具（**v2.5.2**）：输入「记号名 + 表达式」，生成**展开树**，
 逐层探索大序数记号的基本列（FS）展开过程。
 
 零构建纯前端（React 18 UMD + 原生 ES Module），不需要打包器。
@@ -21,7 +21,7 @@ node scripts/serve-nocache.mjs
 然后浏览器打开对应地址。**必须走 HTTP** —— ES Module 结构，直接双击 `index.html`
 会被浏览器的 CORS 拦掉。
 
-## 记号架构（v2.5.1 起）
+## 记号架构（v2.5.2 起）
 
 记号有**两套注册表**，UI 通过适配层统一取用：
 
@@ -189,7 +189,7 @@ node scripts/serve-nocache.mjs
   `aSAN*`、MN 各系、SDBMS、UPMN、GMS …）
 - **硬切改写**：ne 里没有对应物、由远古接口改写成 ne 风格（`PrSS/PPS/SPS/DFSS/CNF/PPS4系/
   MM/MM2/MM3/BSM2/BTM/EPM/BHhM/BDM/BHM2/BIM/UPS/X-Y/wmms/omegaY` …）
-- **经典接口移植**（v2.5.1 新增，`classic_*.js`）：从参考版
+- **经典接口移植**（v2.5.2 新增，`classic_*.js`）：从参考版
   「自助版 NE-4.8.1」抠出工厂、由 `core/ne/classicNotation.js` 接到 ne 接口，共 **33 个**：
   HPrSS/LPrSS 系 7、祖先·基本列序列 8、虫/三角序列 3、SSS 系 5、差序列 2、
   L0-Y 矩阵 2、降下矩阵 2、sudden 矩阵 2、山脉系 2。

@@ -332,7 +332,7 @@ export function TreeNodeView(props) {
       return React.createElement('span', {
         title: '对比视图',
         style: {
-          color: theme.fgMuted, fontSize: 12, marginLeft: 10,
+          color: theme.fgMuted, fontSize: 'inherit', marginLeft: 10,
           whiteSpace: wrapLong ? 'pre-wrap' : 'nowrap',
           ...(wrapLong ? {} : { flexShrink: 0 }),
         },

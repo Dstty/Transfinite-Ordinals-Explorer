@@ -1625,7 +1625,7 @@ React.createElement("div", {
     }
       },
       React.createElement("span", { style: { fontWeight: 700, fontSize: 18, color: theme.accent } },
-        "序数探索器· Transfinite-Ordinals-Explorer · v2.5.1"
+        "序数探索器· Transfinite-Ordinals-Explorer · v2.5.2"
         ),
       React.createElement("div", { style: { display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" } },
         React.createElement("span", { style: { fontSize: 12, color: theme.settingColor } },
