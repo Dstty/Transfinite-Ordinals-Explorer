@@ -1358,6 +1358,8 @@ React.createElement("button", {
             compareDisplay: (() => {
               const cid = getTreeCfg(item).compareView;
               if (!cid) return null;
+              // 'native' = 用记号自身的 display（resolveTreeViews 里原生项的 display 是 null）
+              if (String(cid) === 'native') return (expr) => (item.notation.display ? item.notation.display(expr) : String(expr));
               const v = resolveTreeViews(item.notation.id).find((x) => String(x.id) === String(cid));
               return v && typeof v.display === 'function' ? v.display : null;
             })(),

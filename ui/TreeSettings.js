@@ -254,10 +254,10 @@ export function TreeSettings(props) {
           }, '关闭对比'),
           (views || []).map((v) => {
             const vid = v.id === undefined ? 'native' : String(v.id);
-            const active = (c.compareView || null) === (v.id === undefined ? null : String(v.id));
+            const active = c.compareView != null && String(c.compareView) === vid;
             return React.createElement('button', {
               key: vid,
-              onClick: () => onChange({ compareView: active ? null : (v.id === undefined ? null : String(v.id)) }),
+              onClick: () => onChange({ compareView: active ? null : vid }),
               title: '主位置保持当前视图，注释位置显示这一种；再点一次取消',
               style: chip(active),
             }, v.label);
