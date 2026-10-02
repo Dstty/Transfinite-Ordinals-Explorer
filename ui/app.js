@@ -1983,7 +1983,7 @@ React.createElement("div", {
     fontFamily: "inherit",
                   fontSize: 14
     }
-          }, "＋")
+          }, '✕')
         )
         ),
     // — 单棵树的设置弹窗（树标题表⚙️）—
