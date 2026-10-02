@@ -367,7 +367,7 @@ export function TreeNodeView(props) {
         borderRadius: 6,
         padding: "1px 8px",
         fontFamily: "inherit",
-        fontSize: 12,
+        fontSize: 'inherit',
       },
     });
 
@@ -507,7 +507,7 @@ export function TreeNodeView(props) {
             border: `1px solid ${theme.border}`,
             outline: "none",
             fontFamily: "inherit",
-            fontSize: 16,
+            fontSize: 'inherit',
             padding: "1px 6px",
             borderRadius: 2,
             width: 180,
