@@ -2,6 +2,165 @@
 
 从 v2.2.2 开始记录。
 
+## v2.5.1（2026-10）
+
+这一版把记号体系整体切到 **ne 架构**，并补上自定义记号。
+
+### 记号引擎：默认走 ne，远古实现退为兜底
+
+- `notation/ne/` 里的 **229 个记号**成为正主；`UI` 默认用 **ne 引擎**
+  （`core/ne/tree.js` + `expander.js`，与 ne-rewritten 的 `expander.ts` 同源）展开，
+  树形与 ne-rewritten 一致。URL 加 `?legacy=1` 可退回纯远古实现对照。
+- 新增 `core/ne/uiEngine.js`：把 ne 树**镜像**成 UI 认识的节点形状（每个 UI 节点挂
+  `_neNode`），展开后按身份复用旧节点，`_uid/_collapsed/note` 不丢 ——
+  **渲染代码一行未改**，只改了 5 处接缝。
+- **为什么必须换**：旧引擎需要手写 `low`，而 ne 的边界来自树位置，只能猜一个下界；
+  实测树形会不一致（`prss` 3 节点 vs 2、`rcss` 10 vs **59**、`mountain` 5 vs **17**）。
+- 只有 **11 个记号**回落远古：TON 家族 9 个 + `upms-partial-8/9`（它们在 ne 引擎里
+  本身就会抛错）。此前为旧引擎的下界问题被排除的 30 个记号里，其余 19 个全部恢复。
+- 适配层 `uiBridge` 的下界探测补严（拿**基本列项**而不是 init 种子验；∞ 占位式种子
+  按引擎的 `isInfinityExpr` 特例处理），并给 `semiable` 加「必须有真前驱」的闸 ——
+  后者修掉一整类「展开链无限递归 → 爆栈」。
+
+### 新增：每棵树的「树设置」（`⚙️ 树设置`）+ 家族文件夹
+
+- **每棵树的独立设置**（只作用于那一棵，入口是树标题行右侧 `⚙️ 树设置`）：
+  - **跳转到位置**：输入目标显示文本（如 `1,2,3`），先在已有树里找，找不到就从各根沿基本列
+    **搜索展开**（`core/ne/targetSearch.js`，带步数/毫秒/深度三重上限），命中后把路径在真树上
+    重放并滚动定位。重放被兄弟节点上界挡住时**如实报告**停在哪一步，不假装成功。
+  - **显示方式**：切换显示视图；新增「把该记号的**所有等价显示**一并显示出来」（每个节点后面
+    附上其它视图文本）。
+  - **交互风格**：`更像本工具`（全套快捷键）/ `更像参考版（ner）`（只留方向键 + `Enter` +
+    `Backspace` + `Esc`，字母键与数字键都不抢占）。
+  - **上下键跟随**：`不跟随` / `仅到边界才跟随` / `始终跟随`（固定到中上 · 中间 · 顶部）
+    —— 此前只有硬编码的「刚好可见」，节点跑出视野就看不见了。
+- **`/list`：家族成为独立文件夹**：每个带 n 家族包成一个 `🧬 …家族` 文件夹（虚线框 + 底色 +
+  「家族」徽章，与普通子类一眼可分），点开才是各档位；计数口径不变（家族算一个，
+  `FolderView` 对家族文件夹记 1 而不是对成员求和）。短名撞车时（GMS 的 GBMS/UPMS/LPMS2
+  都叫 `n-P`）自动改用完整名。
+- **修**：help 里「树标题行右侧『显示为…』**或 ⚙️ 设置里切换**」—— 后半句不实（设置弹窗里
+  从来没有视图切换）。现在视图切换确实进了该树的 `⚙️ 树设置`，描述与实现一致。
+
+### 设置现在也会记住（与自定义记号行为一致）
+
+- **修**：自定义记号存了 localStorage，设置却每次恢复默认。现在主题与设置一起持久化
+  （`dsh.settings` / `dsh.theme`），刷新后保持上次状态。
+- 读取时**逐项校验**（整数 + 上下限），任何一项不合法就用默认值，未知键丢掉；
+  主题走白名单；`localStorage` 不可用时静默降级为只在内存里。
+- 新增 `.tmp-ne/verify-settings-persist.mjs`（默认值 / 往返 / 坏存档 / 越界与未知键 /
+  主题白名单 / 清除 / 无 localStorage 降级），并在启动测试里断言设置确实落盘。
+
+### 修：假的 `[+]`；节点改成参考版的卡片样式
+
+- **修**：`(0)(0)` 这类**点 `[+]` 点不动**的节点，`[+]` 该隐藏却没隐藏。
+  根因：显示判据用的是旧引擎的 `canExpandNode`（看 `able`/`semiable`），
+  既不看 ne 的 `is_limit`/FS 语义，也**不看树位置带来的上界**；而展开走的是 ne 引擎，
+  两者必然对不上。新增 `can_expand_ne()`（与 `expand_single` 同构、含 bound），
+  `TreeNodeView` 按记号类型分派判据。
+  实测：1140 个节点上新判据 **0 处**不一致，旧判据有 **16 处**「说能、实际不能」。
+  新增 `.tmp-ne/verify-plus-button.mjs` 做全量一致性扫描。
+- **树样式做成三选一**（`set tree_style=…` 或设置弹窗；**默认 `classic`**，即本工具原本的样式）：
+  | 值 | 来源 | 长相 |
+  |---|---|---|
+  | `classic` | 本工具原有 | 树线 `├─└─` + `[+]`/`[-]`/`[✎]`，注释在行尾、按 `n` 编辑 |
+  | `selfne` | 自助版 NE-4.8.1 | 卡片 + 左侧 5px 色条（极限/后继/展不动）+ `⟨`/`➕`（展不动时禁用）+ marginLeft 缩进，**行尾**常驻注释框 |
+  | `ner` | ne-rewritten | 无卡片；缩进树线 + `▾/▸` 折叠三角 + 点表达式展开（无独立展开按钮），**行首**常驻注释框 |
+- **树样式与交互风格合并成一套「样式」三档**（用户要求两者配套、且都放树设置里）：选一档就**同时**决定外观与键位，不再有两个独立开关；配置从全局 `settings.treeStyle` 移到**按树存**的 `item.treeCfg.style`（每棵树可以不同），`set style=ner` 则把所有树一起换。
+  | 值 | 参照 | 键位 |
+  |---|---|---|
+  | `mine` | 本工具 | 全套：方向键 / `j k h l` / `,` / `Enter` / `0-9` / `n` / `+` / `Esc` |
+  | `selfne` | 自助版 NE-4.8.1 | 它树上基本只有鼠标 → 除 `Esc` 外一律不抢占 |
+  | `ner` | ne-rewritten | `↑↓` 移动 · `Enter` 单次展开 · `Shift+Enter` 一层展开 · `Ctrl+H` 折叠/展开子项 · `Esc`（它没有 `j k h l` / `0-9` / `n` / `+/-`，故不抢占） |
+- 去掉「更像参考版（ner）」这个把两个参考混称的按钮文案（改成「自助版（点击为主）」与「ne-rewritten（行内键位）」）。
+- 新增 `note_width` 设置（80-500，默认 200）+ `set note_width=N`（自助版/ner 两种样式的注释框宽度）。
+- **术语纠正**：**ner = ne-rewritten**（smilelee-lyx.github.io/ne-rewritten，我移植的 `notation/ne/` 与
+  ne 引擎来自它）；**自助版 NE-4.8.1** 是另一个参考版（`classic_*.js` 那 33 个记号与 `selfne`
+  样式取自它）。此前把两者混着叫「参考版（ner）」的地方已改准。
+
+- **修**：新建记号的模板会**卡死页面**。原因是模板里 `FS: (e, i) => e - 1` 的结果
+  **不随 i 变化**，第一次展开后节点有了子节点，`generate_fs` 里那个
+  「试展开次数过多」守卫（只在无子节点时生效）被绕过 → `while` 永远拒绝同一个值。
+  模板已换成**参考版（自助版 NE-4.8.1）新建记号用的那份 PrSS 示例**（逐字保留六个方法）。
+- **新增 `time_limit`**：单次展开的毫秒上限，默认 **5000**，`set timeout=N` 或设置弹窗
+  （±500 步进）可改，`0` = 不限制。超时抛 `TimeLimitError` 并给专用提示
+  （说明树里可能已留下这次的部分展开），不再冻住页面。
+  - ne 引擎：期限做在引擎内部（`generate_fs` 的搜索循环 + `expand_tier_impl` 递归链）。
+  - 旧引擎：`core/engine.js` 文件头写着严禁修改，所以走 `core/ne/timeGuard.js` 的
+    **记号包装** —— 引擎每步都要调 `able/semiable/compare/FS`，包装器每次查时钟即可兜住。
+  - 穿透范围写明：记号自己的函数内部若死循环（同线程无法抢占），需要 Worker 隔离。
+- **修**：`evaluate` 两条路都试（表达式 → `const Notation = {...}` 声明式）。
+  参考版工厂的真实形态是 `function(){ var Notation = {…}; return Notation; }`，
+  按文本猜会误判成声明式 → `Function statements require a function name`。
+- 新增 `scripts/verify-expand-timeout.mjs`：worker 里跑（能超时强杀），验模板各 tier 正常、
+  坏记号被上限中止，并留「关掉上限确实会卡死 / 旧引擎不包装会爆栈」的对照。
+
+### 自定义记号（`/notation`）
+
+- **修**：导入 ne-rewritten 那种**自注册式**记号（例如从那边下载的 CTN2）会报
+  「求值结果不是记号对象」。它们形如
+  `(() => { … const notation = {…}; if (typeof register_notation === 'function') register_notation(notation); })();`
+  —— **没有返回值**，靠调用 `register_notation` 注册（在 ne-rewritten 里那是全局函数）。
+  现在求值时注入一个「只捕获、不真注册」的 shim 接住定义，注册仍走正常流程
+  （分类强制 `category-user`、持久化、UI 桥接一处不少）。实测 CTN2 导入后
+  输入 `CTN2 2` / `CTN2` 均可建树并展开。
+- 导入时的 **id 兜底顺序**：源码里的 `id` → **文件名**（`CTN2.ne-rewritten.js` → `CTN2`）→
+  自动分配 `user1`…；显示名同样兜底。
+- 求值前去掉源码末尾分号（`(() => {…})();` 直接包进 `return ( … )` 会语法错误，
+  而那样 IIFE 不执行、也就捕获不到自注册定义）。
+- 新增「自注册式」常驻回归用例（`verify-usernotations.mjs`）。
+
+- 输入 `notation` **弹出编辑面板**（设置弹窗里也有入口「打开自定义记号…」）：左列已有记号
+  （点选载入源码）、右侧 id / 显示名 / 短名 + 多行编辑器，保存 / 删除 / 关闭。
+  存 localStorage，刷新自动重载。
+- **「导入 .js」**：读入一份记号 JS 填进编辑器（不直接注册）。支持裸对象/工厂、
+  `export default <expr>`、`export const X = <expr>` 三种外壳，并尽量自动识别 id / 显示名；
+  带 `import` 的模块文件给出明确错误（浏览器里没有依赖可解析）。
+- **id 可留空**：JS 里没写就自动分配 `user1`、`user2`…，显示名回落到 id ——
+  「新建 → 保存」这条最短路径不再被必填项挡住。
+- 新建态的「＋ 新建记号」按钮会高亮（此前点了看不出当前处于哪个状态）。
+- 接口与 ne 相同，两种都认：ne 定义 `{display, is_limit, compare, FS, init}`、
+  经典 6 方法 `{parse, format, isSuccessor, generateLimit, expand, compare}`
+  （后者是参考版「自助版 NE-4.8.1」的接口，可整段贴工厂）。
+- 自定义记号进 `/list` 的「**自定义记号**」文件夹；展开走 ne 引擎，与 ne-rewritten 一致。
+- 另有单行快捷方式 `notation add <JS>`、`notation list` / `del` / `show`。
+- 顺带修：输入名索引改为惰性重建并订阅注册表变更（否则运行期注册的记号匹配不到名字）；
+  全局快捷键不再抢弹窗里表单的按键。
+
+### `/list`：改成参考版的两级分类 + 「家族算一个」
+
+- 从「手写 9 组约 150 个 id」改为 **类 / 子类** 两级（序列类 / 矩阵类 / 山脉类 /
+  函数类 / 转换器），归属由记号的 `category_id` 经 `DISPLAY_GROUP` 换算；
+  实测「分类众数 + 7 条例外」即可完全复现参考版的分配。
+- 计数口径按要求改为**家族算一个**（带 n 的家族列全部档位，但只计 1）。
+- `FolderView` 支持任意层嵌套，文件夹计数改为递归。
+- 顺手修掉：`notation/ne/Aw2MN3.js` 文件在、manifest 里没有（浏览器从不加载）；
+  两个分类的 `name` 是未解析的 i18n 键对象（会让 React 抛错）；
+  显示名优先级（ne 的 `simple_name` 直查注册表，不再被旧 meta 挡住）。
+
+### 移植：从参考版「自助版 NE-4.8.1」搬来 33 个用户记号
+
+- HPrSS/LPrSS 系 7、祖先·基本列序列 8、虫/三角序列 3、SSS 系 5、差序列 2、
+  L0-Y 矩阵 2、降下矩阵 2、sudden 矩阵 2、山脉系 2。
+- 新增 `core/ne/classicNotation.js` 适配器（处理两处语义差异：基本列下标基数
+  参考版从 1 起 / ne 从 0 起；后继式参考版返回 null、适配器返回自身）。
+- 每个记号都与参考版工厂**逐项比对**（`verify-classic-parity.mjs`：33/33 一致）。
+
+### 移除
+
+- 转换器**记号** `translator-bm-bocf` 暂时从清单摘掉（文件保留）。BMS→BOCF 能力没丢 ——
+  它是 `bm4` 的一个显示视图。恢复 = 放回 manifest 里那一行注释。
+
+### 文档
+
+- README / DESIGN / help 全面重写；版本号 v2.4.3 → **v2.5.1**。
+
+### 验证
+
+`verify-loader` 71/71 · `verify-ne-integration` 224/230（6 个文档例外）·
+`verify-uibridge` 17/17（默认冒烟 219/219、`--legacy` 217/217）·
+`verify-uiengine-all` 218 个记号镜像逐项一致 · `verify-classic-parity` 33/33 ·
+`verify-usernotations` / `verify-noteditor` 0 失败 · `/list` 自检两种模式全过。
+
 ## v2.4.3（2026-09-03）
 
 ### 新增：命令补全（含灰色功能说明）
@@ -295,3 +454,5 @@ ne-rewritten，全部依赖 `shared.js` 的 `window.NEUTILS`）：
 ### 修复 GitHub Pages 部署报错
 - 根因：GitHub Pages 默认用 Jekyll 构建，会忽略**下划线开头**的文件，导致 `notation/_shared.js` 线上 404，依赖它的 0-Y、TBM、DSM、Veblen、BOCF/MOCF/NOCF/Inacc-OCF、BTBM、BTBM-weak、minus1-Y、T-minus1-Y、UPS1-1r5 等记号全部报 `U is undefined`。
 - 修复：`notation/_shared.js` 改名 `notation/shared.js`（去掉下划线），`index.html` 引用同步更新；仓库根目录新增空 `.nojekyll` 文件，让 Pages 跳过 Jekyll 直接发布文件。
+
+### 展开防护：不许卡死 + 模板换成参考版那份

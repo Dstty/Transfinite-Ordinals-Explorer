@@ -3,6 +3,19 @@
 // ============================================================================
 //  遍历树（先序），每行：展示文本, 注释。导出为 CSV 并触发下载。
 // ============================================================================
+import { resolve_display } from '../core/ne/notationDef.js';
+
+/**
+ * 取节点的纯文本展示（兼容两套记号接口）：
+ *   远古记号的 display 是函数；ne 原生记号（notation/ne/）的 display 是
+ *   { plain, html, from_display } 规格对象。直接对后者调用会抛 TypeError，
+ *   导出就会整列丢内容。
+ */
+function plainDisplay(notation, expr) {
+  const spec = notation.display;
+  if (typeof spec === 'function') return spec(expr);
+  return resolve_display(spec).plain(expr);
+}
 
 /**
  * 递归收集所有节点（先序）。
@@ -69,7 +82,7 @@ export function downloadTreeAsCSV(notation, rootList, notationName, addOutput, i
   const rows = nodes.map(item => {
     let displayStr;
     try {
-      displayStr = notation.display(item.expr);
+      displayStr = plainDisplay(notation, item.expr);
     } catch {
       displayStr = String(item.expr);
     }
@@ -117,7 +130,7 @@ function buildRows(notation, nodes) {
   return nodes.map(item => {
     let displayStr;
     try {
-      displayStr = notation.display(item.expr);
+      displayStr = plainDisplay(notation, item.expr);
     } catch {
       displayStr = String(item.expr);
     }

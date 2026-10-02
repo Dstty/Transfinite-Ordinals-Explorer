@@ -69,10 +69,12 @@ export const NOTATION_META = {
   // —— 保留 parse：矩阵类（PM）——
   'bm4':     { aliases: ['bms', 'bm'], parse: PM, converters: [{ target: '0y', label: '0-Y', convert: (m) => m }], views: [
     { id: 'simple', label: 'simple', kind: 'bm-simple' },
-    { id: 'ocf', label: 'OCF', kind: 'bm-ocf', type: 'ocf' },
-    { id: 'ocf-full', label: 'OCF full', kind: 'bm-ocf', type: 'ocf-full' },
-    { id: 'ns', label: 'n.s. OCF', kind: 'bm-ocf', type: 'ns' },
-    { id: 'ns-full', label: 'n.s. OCF full', kind: 'bm-ocf', type: 'ns-full' },
+    // OCF 系列视图（ocf / ocf-full / ns / ns-full）暂时下线：
+    // 实现仍在 core/bmBocf.js（kind: 'bm-ocf'），需要时把下面四行加回来即可。
+    // { id: 'ocf', label: 'OCF', kind: 'bm-ocf', type: 'ocf' },
+    // { id: 'ocf-full', label: 'OCF full', kind: 'bm-ocf', type: 'ocf-full' },
+    // { id: 'ns', label: 'n.s. OCF', kind: 'bm-ocf', type: 'ns' },
+    // { id: 'ns-full', label: 'n.s. OCF full', kind: 'bm-ocf', type: 'ns-full' },
   ] },
   'upms':    { aliases: [], parse: PM },
   'bhm':     { aliases: [], parse: PM },

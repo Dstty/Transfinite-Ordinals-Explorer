@@ -90,7 +90,7 @@
   }
 
   function display(seq) {
-    if (!seq || seq.length === 0) return "0";
+    if (!seq || seq.length === 0) return "";
     if (seq.length === 1 && seq[0] === Infinity) return "Limit";
     return seq.join(", ");
   }

@@ -13,7 +13,7 @@
 // ============================================================================
 import { readFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import vm from 'vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,7 +39,19 @@ console.log(`=== manifest: ${manifest.length} 个条目 ===\n`);
 // 2) 按清单顺序加载记号文件，收集失败与 id 校验
 const failed = [];
 const registered = new Map(); // id -> 首次出现的 file
+// ne 原生风格记号注册在 core/ne registry（与远古的 window.register 并行）
+const neRegistry = await import(pathToFileURL(join(root, 'core/ne/registry.js')).href);
+
 for (const item of manifest) {
+  // ne 原生记号是 ES module，必须用动态 import 加载（vm 里不能执行 import 语句）
+  if (item.module) {
+    try {
+      await import(pathToFileURL(join(root, item.file)).href);
+    } catch (e) {
+      failed.push(`${item.file}: ${e.message}`);
+    }
+    continue;
+  }
   const before = new Set(global.register.map((n) => n.id));
   try {
     runFile(item.file);
@@ -70,5 +82,9 @@ if (failed.length) {
   for (const f of failed) console.log(`  ${f}`);
   process.exitCode = 1;
 } else {
-  console.log(`\n全部 ${manifest.length} 个条目加载成功，共注册 ${global.register.length} 个记号。`);
+  const neIds = neRegistry.list_notations().map((n) => n.id);
+  console.log(`\n全部 ${manifest.length} 个条目加载成功。`);
+  console.log(`  远古注册表（window.register）: ${global.register.length} 个记号`);
+  console.log(`  ne 注册表（core/ne）:          ${neIds.length} 个记号`);
+  if (neIds.length) console.log(`  ne 记号: ${neIds.join(', ')}`);
 }

@@ -73,6 +73,10 @@
     var item = order[index++];
     var script = document.createElement('script');
     script.src = item.file;
+    // ne 原生风格记号是 ES module（自行 import core/ne 运行时）；旧记号是普通
+    // script（IIFE + 全局 register.push）。两者混排在同一个清单里，
+    // 加载顺序仍由 onload 链保证（module 的 onload 在其依赖执行完后触发）。
+    if (item.module) script.type = 'module';
     script.onload = loadNext;
     script.onerror = function () {
       console.error('[loader] 记号文件加载失败: ' + item.file);

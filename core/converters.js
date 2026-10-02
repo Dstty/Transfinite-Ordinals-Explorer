@@ -19,8 +19,18 @@
 //  display 呈现为对应语法。
 // ============================================================================
 import { NOTATION_META, getNotation } from './register.js';
+// ne 记号的等价显示在 def.display_equiv 里，只有经过 uiBridge 的适配层才拿得到
+// （远古侧的 NOTATION_META 是另一份对象，看不到 ne 的 display_equiv）。
+import { getNotation as getNeNotation } from './ne/uiBridge.js';
 import { to_dbms_display } from './omegaYdbms.js';
 import { bm_to_ocf_IR } from './bmBocf.js';
+
+// display_equiv 各键的显示名（ne 那边走 i18n，这里给常用项兜底，其余用键名本身）
+const EQUIV_LABELS = {
+  layer: '分层', marked: '标记', separate: '分离',
+  simple: '简单式', 'tri BMS': '三角 BMS', 'tri simple': '三角简单式',
+  '0Y': '0-Y', '1Y': '1-Y',
+};
 
 // 树标题视图按钮的原生短名
 const VIEW_LABELS = { bm4: 'BMS', '0y': '0-Y' };
@@ -82,8 +92,40 @@ export function resolveTreeViews(notationId) {
   const notation = getNotation(notationId);
   const meta = NOTATION_META[notationId] || {};
   const views = [{ id: undefined, label: nativeLabel(notationId), display: null }];
+  const usedEquiv = new Set();
 
-  for (const v of meta.views || []) {
+  // ne 记号自带的等价显示（def.display_equiv）→ 视图。
+  // 这一步原先缺失，导致「只在 display_equiv 里声明等价形式」的记号
+  // （如 BTBMS 的 layer / marked）视图数量比 ne-rewritten 少。
+  const neDef = (() => {
+    const n = getNeNotation(notationId);
+    return n && n._def ? n._def : (n && n.display_equiv ? n : null);
+  })();
+  const equiv = neDef && neDef.display_equiv;
+  if (equiv && typeof equiv === 'object') {
+    for (const [key, spec] of Object.entries(equiv)) {
+      if (!spec || typeof spec.plain !== 'function') continue;
+      usedEquiv.add(key);
+      // ⚠ display 必须是**函数**：UI 会直接调用它渲染节点。
+      // 之前这里传的是 { plain, html, from_display } 对象，结果节点显示成
+      // [object Object]、甚至整行空白（用户实测到）。
+      // 需要 from_display 的地方（跳转反解析）把原 spec 挂在函数属性上，两不耽误。
+      const dispFn = (expr) => {
+        try { return spec.plain(expr); } catch { return String(expr); }
+      };
+      dispFn.from_display = spec.from_display;
+      dispFn.plain = spec.plain;
+      dispFn.html = spec.html;
+      views.push({ id: 'equiv:' + key, label: EQUIV_LABELS[key] || key, display: dispFn });
+    }
+  }
+
+  // 有 display_equiv 就以它为准（那是 ne 侧声明的、与 ne-rewritten 一致的一套），
+  // 不再混入远古侧 meta.views，否则同一视图会出现两次（实测 bm4 的 0-Y）。
+  const hasEquiv = usedEquiv.size > 0;
+  for (const v of hasEquiv ? [] : (meta.views || [])) {
+    const vid = typeof v === 'string' ? v : (v && v.id);
+    if (vid && usedEquiv.has(vid)) continue;
     const maker = VIEW_DISPLAY_MAKERS[v.kind];
     views.push({
       id: 'view:' + v.id,
@@ -101,7 +143,15 @@ export function resolveTreeViews(notationId) {
         : null,
     });
   }
-  return views;
+  // 统一按 label 去重（保序）：display_equiv / 远古 meta.views / converters 三个来源
+  // 可能给出同一个视图（实测 bm4 的 0-Y 会出现两次）。
+  const seenLabel = new Set();
+  return views.filter((v) => {
+    const k = String(v.label);
+    if (seenLabel.has(k)) return false;
+    seenLabel.add(k);
+    return true;
+  });
 }
 
 /**

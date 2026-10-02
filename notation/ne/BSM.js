@@ -1,0 +1,144 @@
+// ============================================================================
+//  notation/ne/BSM.js — Bashicu sudden matrix（ne 原生风格）
+// ============================================================================
+//  移植自 ne-rewritten: src/notations/BM-like/BSM.ts
+//  注册 id: bsm
+//
+//  算法逐行照搬（模块级记忆化缓存 data 保持原样），只去类型注解。
+//  依赖本项目的 ./BM.js：compare / display / display_simple /
+//  from_display（源文件里别名为 from_display_BM）/ from_display_simple /
+//  INFINITY / is_infinity / is_limit。
+//  字段（id / name / simple_name / category_id / display / display_equiv /
+//  is_limit / compare / FS / credit_text_id / init）全部保留。
+//
+//  与 ne 的差异：无。BSM 的主显示 from_display 带 standardize（调用 BM 的
+//  from_display(str, true)），与 ne 原文一致。
+//  表达式 = number[][]（Expr）；init() 返回 [Limit, 空矩阵]。
+// ============================================================================
+import {
+    compare,
+    display,
+    display_simple,
+    from_display as from_display_BM,
+    from_display_simple,
+    INFINITY,
+    is_infinity,
+    is_limit,
+} from './BM.js';
+import { register_notation } from '../../core/ne/registry.js';
+
+const data = {};
+
+function expand(m, index) {
+    function parent(x, y, cache) {
+        const str = x + ',' + y;
+        if (cache[str] !== undefined) return cache[str];
+        let p;
+        for (p = x; (p = y ? parent(p, y - 1, cache) : p - 1) >= 0;) {
+            if (m[p][y] < m[x][y]) break;
+        }
+        return (cache[str] = p);
+    }
+
+    function ascending(r, x, y, cache, roots) {
+        const str = r + ',' + x + ',' + y;
+        if (cache[str] !== undefined) return cache[str];
+        return (cache[str] =
+            r <= x && (roots.includes(x) || ascending(r, parent(x, y, parent_cache), y, cache, roots)));
+    }
+
+    function delta(r, LNZ) {
+        return m[r].map((value, y) => (y < LNZ ? child[y] - value : y === LNZ ? child[y] - value - 1 : 0));
+    }
+
+    function expansion(r, n, LNZ, parent_cache, ascend_cache, roots) {
+        const ss = m.slice(0, end_col);
+        const del_r = delta(r, LNZ);
+        for (let a = 1; a <= n; ++a) {
+            for (let x = r; x < end_col; ++x) {
+                ss.push(
+                    ss[x].map((value, y) => value + a * del_r[y] * (ascending(r, x, y, ascend_cache, roots) ? 1 : 0)),
+                );
+            }
+        }
+        return ss;
+    }
+
+    function expansion_append(r, LNZ, parent_cache, ascend_cache, roots) {
+        const del_r = delta(r, LNZ);
+        const res = expansion(r, 1, LNZ, parent_cache, ascend_cache, roots);
+        res.push(
+            m[end_col].map((value, y) => value + del_r[y] * (ascending(r, end_col, y, ascend_cache, roots) ? 1 : 0)),
+        );
+        return res;
+    }
+
+    const end_col = m.length - 1;
+    const result = m.slice(0, end_col);
+    const child = m[end_col];
+    const y_max = child.length - 1;
+    let LNZ = y_max;
+    for (; LNZ >= 0; --LNZ) {
+        if (child[LNZ] > 0) break;
+    }
+    if (LNZ < 0) return result;
+
+    const parent_cache = {};
+    const ascend_cache = {};
+    const special_roots = [];
+    const roots = [];
+    for (let n = end_col; n >= 0;) {
+        special_roots.push((n = parent(n, LNZ, parent_cache)));
+    }
+    for (let n = special_roots[0]; n >= 0; n = LNZ ? parent(n, LNZ - 1, parent_cache) : n - 1) {
+        if (special_roots.includes(parent(n, LNZ, parent_cache))) roots.push(n);
+    }
+    const test_root = m[roots[0]].slice(LNZ + 1);
+    const threshold = expansion_append(roots[0], LNZ, parent_cache, ascend_cache, roots);
+    let n = roots.findIndex((r) =>
+        special_roots.includes(r)
+            ? m[r].slice(LNZ + 1).some((value, dy) => value !== test_root[dy])
+            : compare(expansion_append(r, LNZ, parent_cache, ascend_cache, roots), threshold) < 0,
+    );
+    if (n === -1) n = roots.length;
+    let res = expansion(roots[n - 1], index, LNZ, parent_cache, ascend_cache, roots);
+    if (y_max > 0 && res.every((col) => col[y_max] === 0)) res = res.map((col) => col.slice(0, y_max));
+    return res;
+}
+
+function from_display(str) {
+    return from_display_BM(str, true);
+}
+
+export const BSM = {
+    id: 'bsm',
+    name: 'Bashicu sudden matrix',
+    simple_name: 'BSM',
+    category_id: 'category-bm-like',
+    display: {
+        plain: display,
+        from_display,
+    },
+    display_equiv: {
+        simple: {
+            plain: display_simple,
+            from_display: from_display_simple,
+            name: { id: 'display.simple' },
+        },
+    },
+    is_limit: is_limit,
+    compare: compare,
+    FS: (m, index) => {
+        if (is_infinity(m)) return [Array(index + 1).fill(0), Array(index + 1).fill(1)];
+        if (m.length === 0) return [];
+        const key = display(m);
+        if (!data[key]) data[key] = [];
+        else if (data[key][index] !== undefined) return data[key][index];
+        return (data[key][index] = expand(m, index));
+    },
+    credit_text_id: 'credit.bashicu',
+
+    init: () => [INFINITY(), []],
+};
+
+register_notation(BSM);

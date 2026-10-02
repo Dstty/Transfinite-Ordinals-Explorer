@@ -27,8 +27,11 @@ const mockDoc = {
   },
   appendChild(el) {
     injected.push({ file: el.src, type: el.type, attrs: el._attrs });
-    if (el.src && !el.type) {
-      // 普通 script：模拟同步加载结果
+    // 普通 script 与 module script 都会在加载完成后触发生载回调
+    // （真实浏览器里 module 的 onload 在其依赖图执行完后触发；这里 mock 成同步完成）。
+    // ⚠ 不能因为 type=module 就跳过：notation/ne/ 下的原生记号是 module，
+    //   跳过会让加载链中途断掉，app.js 永远不会注入。
+    if (el.src) {
       if (failSet.has(el.src)) {
         if (el.onerror) el.onerror(new Error('mock fail: ' + el.src));
       } else if (el.onload) {
@@ -57,7 +60,8 @@ const check = (cond, msg) => {
 
 console.log('--- 1. 依赖顺序（dependsOn 先于消费者注入）---');
 const byFile = new Map(manifest.map((it) => [it.file, it]));
-const injectedFiles = injected.filter((i) => i.file && !i.type).map((i) => i.file);
+// 记号文件（含 module 条目）的注入顺序；app.js 是启动入口，单独断言
+const injectedFiles = injected.filter((i) => i.file && i.file !== 'ui/app.js').map((i) => i.file);
 const pos = new Map(injectedFiles.map((f, i) => [f, i]));
 for (const it of manifest) {
   for (const dep of it.dependsOn || []) {
@@ -81,7 +85,7 @@ vm.runInThisContext(load('core/loader.js'), { filename: 'core/loader.js' });
 const afterFail = injected.filter((i) => i.file);
 check(afterFail.some((i) => i.file === 'ui/app.js'), 'shared.js 失败后仍注入 app.js（不中断）');
 check(afterFail.filter((i) => i.file === 'notation/rewritten/shared.js').length === 1, '失败文件被记录（仅注入一次）');
-check(afterFail.filter((i) => i.file && !i.type).length >= manifest.length - 1, '其余记号文件继续注入');
+check(afterFail.filter((i) => i.file && i.file !== 'ui/app.js').length >= manifest.length - 1, '其余记号文件继续注入');
 
 console.log('--- 4. head 期兜底（document.body 为 null 时回退 document.head）---');
 injected.length = 0;

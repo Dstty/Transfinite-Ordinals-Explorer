@@ -1,0 +1,661 @@
+// ============================================================================
+//  notation/ne/UP2DBMS-v1b-plus.js — UP2DBMS v1B+（ne 原生风格）
+// ============================================================================
+//  移植自 ne-rewritten: src/notations/MN/UPMN/UP2DBMS-v1b-plus.ts（快照 d2d79cd）
+//  注册 id: up2dbms-v1b+
+//  分类: category-upmn-test（源文件原文 category_id，未改；ne 里定义在
+//        UPMN/categories.ts，本项目骨架 notation/ne/categories.js 未预置，
+//        由 ./UPMN_utils.js 的 ensure_category 补注册）
+//  表达式 = Mountain = Column[]，Column = Entry[]，Entry = [number, Sep]（Sep = number）
+//
+//  依赖映射：
+//    '@/utils.ts'                     → ../../core/ne/utils.js
+//    '@/notations/notation_utils.ts' 的 sequence_FS_variants
+//                                     → ../../core/ne/notationUtils.js（已搬，语义一致）
+//    '@/notations/draw_mountain_diagram.ts' 的 draw_mountain_diagram
+//                                     → ../../core/ne/drawMountainDiagram.js（已搬）
+//    '@/notations/MN/SMN/n_MN.ts'     → ./UPMN_utils.js（UPMN 家族共用的 n_MN 基础层；
+//        本文件取 entry_display / from_display / from_display_simple / INFINITY /
+//        is_infinity / mountain_display / mountain_display_marked 七个成员）
+//    NotationDefinition / DiagramControl / Diagram / MountainViewSource / MountainNode /
+//    MountainShape / MarkSpec / Expr_nMN / Position / RelColumn / RelEntry / DiagramData
+//    → 纯类型，删除
+//
+//  与 ne 原版的差异：无（算法、常量、字段逐行照搬）。
+//  文件末尾自注册（manifest 需以 module: true 注入）。
+// ============================================================================
+import {
+    anti_lex_compare,
+    boolean_compare,
+    deepcopy,
+    lex_compare,
+    number_compare,
+    tuple_lex_compare,
+} from '../../core/ne/utils.js';
+import { sequence_FS_variants } from '../../core/ne/notationUtils.js';
+import { draw_mountain_diagram } from '../../core/ne/drawMountainDiagram.js';
+import {
+    entry_display as entry_display_nMN,
+    from_display as from_display_nMN,
+    from_display_simple as from_display_simple_nMN,
+    INFINITY as INFINITY_nMN,
+    is_infinity as is_infinity_nMN,
+    mountain_display as display_nMN,
+    mountain_display_marked as display_marked_nMN,
+} from './UPMN_utils.js';
+import { register_notation } from '../../core/ne/registry.js';
+
+const INFINITY = Infinity;
+
+function is_infinity(expr) {
+    return expr === INFINITY;
+}
+
+function infinity_FS(index) {
+    const result = [[]];
+    for (let i = 1; i <= index; ++i) {
+        result[i] = [];
+        for (let j = 0; j < i; j++) {
+            result[i].push([i - 1, 0]);
+        }
+        result[i].push([i - 1, 1]);
+    }
+    return result;
+}
+
+function is_limit(expr) {
+    if (is_infinity(expr)) return true;
+    return expr.length > 0 && expr[expr.length - 1].length > 0;
+}
+
+function entry_compare(entry1, entry2) {
+    return tuple_lex_compare(entry1, entry2, [number_compare, number_compare]);
+}
+
+export function column_compare(col1, col2) {
+    return lex_compare(col1, col2, entry_compare);
+}
+
+function compare(expr1, expr2) {
+    if (is_infinity(expr1) || is_infinity(expr2)) {
+        return boolean_compare(is_infinity(expr1), is_infinity(expr2));
+    }
+    return lex_compare(expr1, expr2, column_compare);
+}
+
+function to_nMN(expr) {
+    if (is_infinity(expr)) return INFINITY_nMN();
+    return expr.map((col) => col.map((entry) => [entry[0] + 1, entry[1]]));
+}
+
+function from_nMN(m) {
+    if (is_infinity_nMN(m)) return INFINITY;
+    return m.map((col) => col.map((entry) => [entry[0] - 1, entry[1]]));
+}
+
+function entry_display(entry) {
+    return entry_display_nMN([entry[0] + 1, entry[1]], false);
+}
+
+function display(expr, simple = false) {
+    return display_nMN(to_nMN(expr), simple);
+}
+
+function display_marked(expr, mark) {
+    return display_marked_nMN(to_nMN(expr), mark);
+}
+
+function from_display(str) {
+    const m = from_display_nMN(str);
+    try {
+        return from_nMN(m);
+    } catch (_) {
+        throw new Error('Illegal input string: ' + str);
+    }
+}
+
+function from_display_simple(str) {
+    const m = from_display_simple_nMN(str);
+    try {
+        return from_nMN(m);
+    } catch (_) {
+        throw new Error('Illegal input string: ' + str);
+    }
+}
+
+function vertical_increase(v, sep) {
+    if (v.length <= sep) {
+        const result = Array(sep).fill(0);
+        result.push(1);
+        return result;
+    }
+    const result = v.slice();
+    result[sep]++;
+    result.fill(0, 0, sep);
+    return result;
+}
+
+function column_verticals(col) {
+    let current = [];
+    const result = [];
+    for (let entry of col) {
+        current = vertical_increase(current, entry[1]);
+        result.push(current);
+    }
+    return result;
+}
+
+function expr_verticals(expr) {
+    return expr.map(column_verticals);
+}
+
+function vertical_compare(v1, v2) {
+    return anti_lex_compare(v1, v2, number_compare);
+}
+
+function find_index_below_row(V, v) {
+    const working = [[], ...V];
+    let l = 0,
+        r = V.length;
+    if (vertical_compare(v, working[r]) > 0) return r;
+    while (l < r) {
+        const mid = (l + r + 1) >> 1;
+        const cmp = vertical_compare(v, working[mid]);
+        if (cmp > 0) l = mid;
+        else r = mid - 1;
+    }
+    return l;
+}
+
+function find_index_below_equal_row(V, v) {
+    const working = [[], ...V];
+    let l = 0,
+        r = V.length;
+    if (vertical_compare(v, working[r]) >= 0) return r;
+    while (l < r) {
+        const mid = (l + r + 1) >> 1;
+        const cmp = vertical_compare(v, working[mid]);
+        if (cmp >= 0) l = mid;
+        else r = mid - 1;
+    }
+    return l;
+}
+
+function compute_parent(expr, V, [i, j]) {
+    const entry = expr[i][j];
+    const pi = entry[0];
+    const v = V[i][j];
+    const pj = find_index_below_row(V[pi], v);
+    return [pi, pj];
+}
+
+function parents(expr, V) {
+    const result = [];
+    for (let i = 0; i < expr.length; i++) {
+        result[i] = [];
+
+        for (let j = 0; j < expr[i].length; j++) {
+            result[i][j] = compute_parent(expr, V, [i, j]);
+        }
+    }
+
+    return result;
+}
+
+function to_rel_column(col, r) {
+    return col.map(([v, s]) => (v >= r ? [true, v - r, s] : [false, v, s]));
+}
+
+function compare_rel_column(a, b) {
+    return lex_compare(a, b, compare_rel_entry);
+}
+
+function compare_rel_entry(a, b) {
+    return tuple_lex_compare(a, b, [boolean_compare, number_compare, number_compare]);
+}
+
+function compute_up_1mn(expr, P, [Ri, Rj]) {
+    const right = expr.length - 1;
+
+    const result = Array(expr.length);
+    result.fill(false, 0, Ri);
+    result[Ri] = true;
+
+    if (Rj === 0) {
+        result.fill(true, Ri);
+        return result;
+    }
+
+    for (let i = Ri + 1; i < expr.length; i++) {
+        const col = expr[i];
+
+        if (col.length <= Rj) {
+            result[i] = false;
+            continue;
+        }
+
+        if (P[i][Rj][0] !== Ri) {
+            result[i] = result[P[i][Rj][0]];
+            continue;
+        }
+
+        const j = col.findIndex((entry) => entry[0] === Ri);
+        if (j > 0) {
+            let p = i;
+            while (P[p][j - 1][0] !== Ri) p = P[p][j - 1][0];
+
+            if (!result[p]) {
+                result[i] = false;
+                continue;
+            }
+        }
+
+        // perform UP check
+        const X_start = i;
+        let Y_start = right;
+        while (P[Y_start][j][0] !== Ri) {
+            Y_start = P[Y_start][j][0];
+        }
+
+        if (Y_start <= X_start) {
+            result[i] = X_start === Y_start;
+            continue;
+        }
+
+        const X0 = expr[X_start].slice(j);
+        const Y0 = expr[Y_start].slice(j);
+        const cmp_0 = column_compare(X0, Y0);
+        if (cmp_0 !== 0) {
+            result[i] = cmp_0 > 0;
+            continue;
+        }
+
+        for (let k = 1; Y_start + k < expr.length; k++) {
+            const Xk = to_rel_column(expr[X_start + k], X_start);
+            const Yk = to_rel_column(expr[Y_start + k], Y_start);
+            const cmp = compare_rel_column(Xk, Yk);
+            if (cmp !== 0) {
+                result[i] = cmp > 0;
+                break;
+            }
+        }
+
+        if (result[i] === undefined) {
+            result[i] = true;
+        }
+    }
+
+    return result;
+}
+
+function compute_up_2mn(expr, P, [Ri, Rj]) {
+    const right = expr.length - 1;
+
+    const result = Array(expr.length);
+    result.fill(false, 0, Ri);
+    result[Ri] = true;
+
+    for (let i = Ri + 1; i < expr.length; i++) {
+        const col = expr[i];
+
+        if (col.length <= Rj + 1) {
+            result[i] = false;
+            continue;
+        }
+
+        if (col.length >= Rj + 3) {
+            result[i] = result[P[i][Rj + 1][0]];
+            continue;
+        }
+
+        const is_finite = col[col.length - 1][1] === 0;
+        if (is_finite) {
+            result[i] = result[P[i][Rj + 1][0]];
+            continue;
+        }
+
+        const p = P[i][Rj + 1][0];
+        if (p !== Ri) {
+            result[i] = result[p];
+            continue;
+        }
+
+        // perform UP check
+        do {
+            const X_start = i;
+            let Y_start = right;
+            while (expr[Y_start].length !== Rj + 2) {
+                Y_start = P[Y_start][Rj + 1][0];
+            }
+
+            if (Y_start <= X_start) {
+                result[i] = X_start === Y_start;
+                break;
+            }
+
+            for (let k = 1; Y_start + k < expr.length; k++) {
+                const Xk = to_rel_column(expr[X_start + k], X_start);
+                const Yk = to_rel_column(expr[Y_start + k], Y_start);
+                const cmp = compare_rel_column(Xk, Yk);
+                if (cmp !== 0) {
+                    result[i] = cmp > 0;
+                    break;
+                }
+            }
+
+            if (result[i] === undefined) {
+                result[i] = true;
+                break;
+            }
+        } while (false);
+    }
+
+    return result;
+}
+
+function copy_column(col, [Ri, Rj], offset, y_offset, up) {
+    let result = col.map(([v, s]) => [v > Ri ? v + offset : v < Ri ? v : up ? v + offset : v, s]);
+    if (up && y_offset > 0) {
+        result = [...result.slice(0, Rj), ...Array(y_offset).fill([result[Rj][0], 0]), ...result.slice(Rj)];
+    }
+    return result;
+}
+
+function expand(expr, index, shorter) {
+    if (expr.length === 0) return expr;
+    const right = expr.length - 1;
+    if (expr[right].length === 0) return expr.slice(0, -1);
+    const top = expr[right].length - 1;
+
+    const V = expr_verticals(expr);
+    const P = parents(expr, V);
+
+    const [Ri, Rj] = P[right][top];
+
+    const is_finite = expr[right][top][1] === 0;
+
+    const up_list = is_finite ? compute_up_1mn(expr, P, [Ri, Rj]) : compute_up_2mn(expr, P, [Ri, Rj]);
+
+    const result = expr.slice(0, -1);
+    result.push(expr[right].slice(0, -1));
+    result[right].push(...expr[Ri].slice(Rj));
+
+    let y_offset = top - Rj;
+
+    for (let w = 1; w <= index; w++) {
+        for (let i = Ri + 1; i <= right; i++) {
+            result.push(copy_column(result[i], [Ri, Rj], (right - Ri) * w, y_offset * w, up_list[i]));
+        }
+    }
+    if (shorter) result.pop();
+    return result;
+}
+
+export function convert_to_layer(om) {
+    if (is_infinity(om)) return om;
+
+    const V = om.map(column_verticals);
+    const depthMap = [];
+
+    for (let i = 0; i < om.length; i++) {
+        depthMap[i] = [];
+        for (let j = 0; j < om[i].length; j++) {
+            const [pi, pj] = compute_parent(om, V, [i, j]);
+            depthMap[i][j] = pj === om[pi].length ? 0 : 1 + depthMap[pi][pj];
+        }
+    }
+
+    const dm = deepcopy(om);
+    for (let i = 0; i < dm.length; i++) {
+        const column = dm[i];
+        for (let j = 0; j < column.length; j++) {
+            const entry = column[j];
+            entry[0] = depthMap[i][j];
+        }
+    }
+    return dm;
+}
+
+export function convert_from_layer(dm) {
+    if (is_infinity(dm)) return dm;
+
+    const om = deepcopy(dm);
+
+    const V = om.map(column_verticals);
+
+    for (let i = 0; i < om.length; i++) {
+        const column = om[i];
+        for (let j = 0; j < column.length; j++) {
+            const entry = column[j];
+
+            let i1 = i,
+                j1 = j - 1;
+            while (true) {
+                if (i1 === 0) {
+                    entry[0] = 0;
+                    break;
+                }
+                if (j1 >= 0) {
+                    [i1, j1] = compute_parent(om, V, [i1, j1]);
+                } else {
+                    i1 = i1 - 1;
+                }
+                let j0 = find_index_below_equal_row(V[i1], j === 0 ? [] : V[i][j - 1]);
+                if (j0 === dm[i1].length || dm[i1][j0][0] < entry[0]) {
+                    entry[0] = i1;
+                    break;
+                }
+            }
+        }
+    }
+
+    return om;
+}
+
+function compute_1Y_mountain(expr) {
+    const V = expr_verticals(expr);
+    const P = parents(expr, V);
+
+    const result = [];
+
+    for (let i = 0; i < expr.length; i++) {
+        result[i] = [1];
+        for (let j = expr[i].length - 1; j >= 0; j--) {
+            const [Pi, Pj] = P[i][j];
+            result[i].unshift(result[i][0] + result[Pi][Pj]);
+        }
+    }
+
+    return result;
+}
+
+function compute_1Y(expr) {
+    return compute_1Y_mountain(expr).map((col) => col[0]);
+}
+
+function display_as_1Y(expr) {
+    if (is_infinity(expr)) return '1,3,9';
+    return '' + compute_1Y(expr);
+}
+
+function from_1Y(seq) {
+    const m_1y = seq.map((x) => [x]);
+    const result = [];
+    for (let i = 0; i < seq.length; i++) {
+        result[i] = [];
+        let current = seq[i];
+        while (current !== 1) {
+            const j = result[i].length;
+            let pi = j === 0 ? i - 1 : result[i][j - 1][0];
+            let pj = -1;
+
+            while (true) {
+                if (result[pi].length === 0) {
+                    pj = 0;
+                    break;
+                }
+
+                const top_j = result[pi][result[pi].length - 1][1] > 0 ? result[pi].length - 1 : result[pi].length;
+                pj = Math.min(j, top_j);
+
+                if (m_1y[pi][pj] < current) {
+                    break;
+                } else {
+                    pi = j === 0 ? pi - 1 : result[pi][pj - 1][0];
+                }
+            }
+
+            result[i].push([pi, pj < j ? 1 : 0]);
+            current -= m_1y[pi][pj];
+            m_1y[i].push(current);
+            if (pj < j && current !== 1) throw new Error('Illegal 1Y seq: ' + seq);
+        }
+    }
+    return result;
+}
+
+function from_display_as_1Y(str) {
+    const seq_1Y = str.split(',').map(Number);
+    if (!seq_1Y.every((x) => Number.isInteger(x) && x > 0)) throw new Error('Illegal 1Y seq: ' + str);
+    if (seq_1Y.length > 0 && seq_1Y[0] !== 1) throw new Error('Illegal 1Y seq: ' + str);
+    if (lex_compare(seq_1Y, [1, 3, 9], number_compare) === 0) return INFINITY;
+    return from_1Y(seq_1Y);
+}
+
+function sep_display(sep, simple) {
+    if (simple && sep === 0) return '';
+    return ','.repeat(sep + 1);
+}
+
+function vertical_display(v) {
+    const result = [];
+    for (let i = v.length - 1; i >= 0; i--) result.push(...Array(v[i]).fill(i));
+    return result.map((s) => sep_display(s, false)).join('/');
+}
+
+export function vertical_diff(v1, v2) {
+    if (v1.length !== v2.length) return v1.length - 1;
+    for (let i = v1.length - 1; i >= 0; i--) {
+        if (v1[i] !== v2[i]) return i;
+    }
+
+    return -1;
+}
+
+/** 由表达式与等价表示算出"形状 + 布局选项"：画布版与 HTML 版共用这一份数据。 */
+function build_up2dbms_v1b_plus_mountain_source(m, current_equiv) {
+    if (is_infinity(m) || m.length === 0) return undefined;
+
+    const m_display = current_equiv?.includes('layer') ? convert_to_layer(m) : m;
+    const is_y = current_equiv?.includes('1Y') === true;
+    const m_1y = is_y ? compute_1Y_mountain(m) : [];
+    const V = expr_verticals(m);
+    const P = parents(m, V);
+
+    // 每列第 0 个节点是底行哨兵（vertical 为 []）：空行因此参与排序，也是左腿的落点。
+    const shape = m.map((col, i) => {
+        const nodes = [{ vertical: [], text: is_y ? '' + m_1y[i][0] : '*' }];
+        for (let j = 0; j < col.length; j++) {
+            const [pi, pj] = P[i][j];
+            const node = {
+                vertical: V[i][j],
+                text: is_y ? '' + m_1y[i][j + 1] : entry_display(m_display[i][j]),
+            };
+            // 哨兵占列内位置 0，故“父项下方一格”的落点正是位置 pj。
+            if (pi !== -1) node.leg_target = [pi, pj];
+            nodes.push(node);
+        }
+        return nodes;
+    });
+
+    return {
+        shape,
+        layout: {
+            vertical_display,
+            vertical_compare,
+            // vertical_diff 给出的是相邻两行的间隔数，分割线数量为其 + 1。
+            separator_count: (higher, lower) => vertical_diff(higher, lower) + 1,
+        },
+    };
+}
+
+/** 计算层：把表达式化为山脉形状，交给通用绘制函数。 */
+function draw_up2dbms_v1b_plus_mountain_diagram(m, current_equiv, invert_vertical) {
+    const source = build_up2dbms_v1b_plus_mountain_source(m, current_equiv);
+    if (!source) return undefined;
+    return draw_mountain_diagram(source.shape, source.layout, { invert_vertical });
+}
+
+export const draw_diagram_control = {
+    default_data: { current_equiv: undefined, invert_vertical: undefined },
+    draw_diagram: (_expr, _data) =>
+        draw_up2dbms_v1b_plus_mountain_diagram(_expr, _data.current_equiv, _data.invert_vertical ?? false),
+    handle_action: (data, action) => {
+        if (action.type === 'scroll') {
+            if (action.direction === 'down') {
+                return { ...data, invert_vertical: true };
+            } else if (action.direction === 'up') {
+                return { ...data, invert_vertical: false };
+            }
+        }
+        return null;
+    },
+};
+
+export const UP2DBMS_v1b_plus = {
+    id: 'up2dbms-v1b+',
+    name: 'UP2DBMS v1B+',
+    description: [
+        { id: 'description.up2dbms-v1b-plus.1' },
+        { id: 'description.up2dbms-v1b-plus.2' },
+        { id: 'description.up2dbms-v1b-plus.3' },
+        { id: 'description.up2dbms-v1b-plus.4' },
+        { id: 'description.up2dbms-v1b-plus.5' },
+        { id: 'description.up2dbms-v1b-plus.6' },
+        { id: 'description.up2dbms-v1b-plus.7' },
+        { id: 'description.up2dbms-v1b-plus.8' },
+    ],
+    category_id: 'category-upmn-test',
+    display: {
+        plain: (m) => display(m),
+        from_display,
+        name: { id: 'display.index' },
+    },
+    display_equiv: {
+        layer: {
+            plain: (m) => display(convert_to_layer(m)),
+            from_display: (str) => convert_from_layer(from_display(str)),
+            name: { id: 'display.layer' },
+        },
+        marked: {
+            plain: (m) => display_marked(m, 'label'),
+            html: (m) => display_marked(m, 'sub'),
+            from_display: from_display,
+            name: { id: 'display.index-marked' },
+        },
+        simple: {
+            plain: (m) => display(m, true),
+            from_display: from_display_simple,
+            name: { id: 'display.index-simple' },
+        },
+        'layer simple': {
+            plain: (m) => display(convert_to_layer(m), true),
+            from_display: (s) => convert_from_layer(from_display_simple(s)),
+            name: { id: 'display.layer-simple' },
+        },
+        UP1Y: {
+            plain: display_as_1Y,
+            from_display: from_display_as_1Y,
+        },
+    },
+    draw_diagram: draw_diagram_control,
+    mountain_view: (expr, data) => build_up2dbms_v1b_plus_mountain_source(expr, data?.current_equiv),
+    ...sequence_FS_variants(expand, is_infinity, infinity_FS, is_limit, display),
+    is_limit,
+    compare,
+    credit_text_id: 'credit.upmn',
+
+    init: () => [INFINITY, []],
+};
+
+register_notation(UP2DBMS_v1b_plus);

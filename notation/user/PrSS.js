@@ -93,7 +93,7 @@
 
   /** 展示 */
   function display(seq) {
-    if (!seq || seq.length === 0) return "0";
+    if (!seq || seq.length === 0) return "";
     if (seq.some(v => v === Infinity)) return "Limit";
     return seq.join(", ");
   }
