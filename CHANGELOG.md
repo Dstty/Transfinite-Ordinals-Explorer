@@ -2,6 +2,47 @@
 
 从 v2.2.2 开始记录。
 
+## 未发布
+
+### 首屏加载：串行链改成按依赖分层并行
+
+- **问题**：`core/loader.js` 是 `script.onload` 串行链 —— 一个文件下完才发下一个请求。
+  清单 207 条，本地服务器 RTT≈0 所以看不出问题，一到 GitHub Pages 就是 207 次串行
+  往返。实测（本机直连 Pages）单请求 330～380 ms，**外推约 68～79 秒才出首屏**。
+- **改法**：按清单 `dependsOn` **分层**，同层一次性全部注入（浏览器并行 / HTTP/2
+  多路复用），层间再 await。依赖语义完全不变，仍以清单为准；单文件失败仍只告警并继续。
+  实测分 4 层（1 / 144 / 56 / 6），最大一层 144 个文件同时发起。
+- **实测收益**：同样一批资源，串行单请求 382 ms；并行 32 个共 713 ms。
+  按此外推 207 个：**79 s → 4.6 s（约 17×）**。请求总数不变（仍是 207），改的是排队方式。
+- **顺带修出一个真缺陷**：`legacy/TON-DoR.js` 定义的 `TON_noraise_compare` 被
+  `TON-DRC/DRP/DRPC/I/IBP` 在**加载期**使用，但清单只声明它们依赖 `TON-main.js`。
+  串行时靠清单里的先后顺序侥幸成立，并行就会 `ReferenceError`。已给这 5 个条目补
+  `dependsOn: TON-DoR.js`。
+- `notation/ne/categories.js` 加 `bootstrap: true`，单独成第 0 层：它没有 dependsOn，
+  分层后本来会和 ne 记号挤在同一层，而 `register_notation` 若先于 `register_category`
+  执行，注册表会去自动补分类、丢掉生成器元信息。
+- 新增 `scripts/verify-loader-layers.mjs`：按同一套分层逻辑复算层，在隔离 vm context
+  里**逆序 + 随机**打乱同层执行顺序（12 轮），任何抛错即说明「同层有未声明的依赖」。
+  这个脚本就是靠一次逆序跑出了上面那个 TON 依赖缺陷。
+- `scripts/verify-loader.mjs` 补分层断言（层数、同层依赖数为 0、bootstrap 独占第 0 层、
+  最大层 > 100），并等 `window.__dshLoaderDone`。
+
+### 自检口径与退出码
+
+- **自检装载口径改为「读清单」**：`verify-ne-integration.mjs` 与 `verify-uibridge.mjs`
+  原先 `readdirSync('notation/ne')` 扫目录，会把清单里已注释掉、文件仍在的
+  `BM-BOCF.js`（`translator-bm-bocf`）一并装载 —— 于是脚本量到 230/219，浏览器
+  实际是 229/218，两个数字长期对不上，还会被误当成「新记号」。现在两者都 import
+  `core/notation-manifest.js` 取 `notation/ne/` 条目，与 `core/loader.js` 同源；
+  目录里有、清单没声明的文件会被打印出来但不加载。
+- **冒烟失败不再一律算失败**：新增 `core/ne/knownBroken.js`（唯一一份已知回落 id 表，
+  `uiBridge` 的 `NE_ENGINE_BROKEN` 由它构造），`verify-ne-integration.mjs` 据此把
+  失败分成「已知回落 6」与「意外 0」，**只有装载失败 / 清单文件缺失 / 意外冒烟失败
+  才返回 1**。此前 `process.exitCode` 只看装载失败，6 个已知失败也永远绿。
+- 注释与文档口径对齐：`uiBridge.js` 文件头「就崩的 6 个」改为说明两个口径
+  （单步 6 / 连展两步 11）；README、DESIGN 里 `notation/ne/` 的「126 文件」
+  改为「清单 124 个记号文件，注册 229 个」。
+
 ## v2.5.2（2026-10）
 
 这一版把记号体系整体切到 **ne 架构**，并补上自定义记号。

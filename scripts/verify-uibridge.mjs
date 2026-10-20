@@ -9,7 +9,7 @@
 //    2. ?legacy=1 → 同 id 取远古版（与改造前一致）
 //  用法：node scripts/verify-uibridge.mjs [--legacy]
 // ============================================================================
-import { appendFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -32,13 +32,16 @@ for (const rel of ['notation/user/PrSS.js', 'notation/user/CNF.js']) {
   vm.runInThisContext(readFileSync(join(root, rel), 'utf8'), { filename: rel });
 }
 
-// ---- ne 注册表：装载全部 ne 记号 ----
-await import('../notation/ne/categories.js');
-for (const f of readdirSync(join(root, 'notation/ne'))
-  .filter((f) => f.endsWith('.js') && f !== 'categories.js' && !f.startsWith('_'))
-  .sort()) {
+// ---- ne 注册表：按**清单**装载（与浏览器同源，core/loader.js 读的就是它）----
+// 不要扫目录：notation/ne/BM-BOCF.js 被清单注释掉了（转换器记号暂时摘除），
+// 扫目录会多算一个记号，让这里的「全量」与线上跑的不是同一个集合。
+await import('../core/notation-manifest.js');
+const neEntries = (globalThis.window.NOTATION_MANIFEST || []).filter(
+  (e) => typeof e.file === 'string' && e.file.startsWith('notation/ne/'),
+);
+for (const e of neEntries) {
   try {
-    await import('../notation/ne/' + f);
+    await import('../' + e.file);
   } catch {
     /* 个别文件失败不影响本验证 */
   }

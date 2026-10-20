@@ -21,13 +21,28 @@ node scripts/serve-nocache.mjs
 然后浏览器打开对应地址。**必须走 HTTP** —— ES Module 结构，直接双击 `index.html`
 会被浏览器的 CORS 拦掉。
 
+## 首屏加载（GitHub Pages 上的速度）
+
+清单有 **207 条**（125 个 ne 记号 + 82 个远古/移植实现）。早期版本用 `script.onload`
+串行链加载，本地 RTT≈0 看不出问题，一到 GitHub Pages 就是 207 次串行往返 ——
+实测单请求 330～380 ms，**约 68～79 秒才出首屏**。
+
+现在 `core/loader.js` **按清单 `dependsOn` 分层**，同层一次性全部注入（浏览器并行 /
+HTTP/2 多路复用），层间再等。实测分 4 层（1 / 144 / 56 / 6），外推 **约 4.6 秒**。
+请求总数没变，改的是排队方式。
+
+代价是一条纪律：**同层文件之间不允许有未声明的依赖**。跨文件全局（`window.NEUTILS`、
+`sequence_display`、`TON_noraise_compare` …）必须在清单里写 `dependsOn`，否则并行时
+顺序不定就炸。`scripts/verify-loader-layers.mjs` 会把同层顺序逆序/随机打乱跑 12 轮
+来兜这条底线。
+
 ## 记号架构（v2.5.2 起）
 
 记号有**两套注册表**，UI 通过适配层统一取用：
 
 | | ne 注册表（正主） | 远古注册表（兜底） |
 |---|---|---|
-| 位置 | `notation/ne/`（126 个文件，229 个记号） | `notation/legacy` `rewritten` `user`（88 文件，168 记号） |
+| 位置 | `notation/ne/`（清单 124 个记号文件，注册 229 个） | `notation/legacy` `rewritten` `user`（88 文件，168 记号） |
 | 接口 | `NotationDefinition`：`{display, is_limit, compare, FS, init}` | `register.push({display, able, semiable, compare, FS, init})` |
 | 展开引擎 | `core/ne/`（`tree.js` + `expander.js`，与 ne-rewritten 的 `expander.ts` 同源） | `core/engine.js`（远古 `FSbounded`） |
 | 何时用 | **默认** | `?legacy=1`；以及 ne 引擎自己就崩的 11 个记号 |
@@ -178,7 +193,7 @@ node scripts/serve-nocache.mjs
 
 | 目录 | 内容 | 数量 |
 |---|---|---|
-| `notation/ne/` | ne-rewritten 原样搬运 + 本项目硬切改写 + **从参考版移植的用户记号** | 126 文件 / 229 记号 |
+| `notation/ne/` | ne-rewritten 原样搬运 + 本项目硬切改写 + **从参考版移植的用户记号** | 124 文件 / 229 记号（目录里另有 1 个未入清单的 `BM-BOCF.js`） |
 | `notation/legacy/` | 远古版（hypcos/notation-explorer，算法原样保留） | 52 文件 |
 | `notation/rewritten/` | 早期 ne-rewritten 移植（走远古接口，`window.NEUTILS`） | 31 文件 |
 | `notation/user/` | 用户自有（PrSS/PPS/SPS/DFSS/CNF） | 5 文件 |
@@ -248,7 +263,7 @@ index.html              入口（React CDN → register 初始化 → 清单 →
 core/
   register.js           远古全局 register + 别名/parse 补充表（NOTATION_META）
   engine.js             远古展开核心（FSbounded + expandNode）
-  loader.js             清单驱动加载器（按 dependsOn 拓扑排序，动态注入 script）
+  loader.js             清单驱动加载器（按 dependsOn 分层，同层并行注入 script）
   notation-manifest.js  记号文件清单（新增记号在此加一条，无需改 index.html）
   parseShorthands.js    矩阵/序列简写解析
   converters.js         记号互译 / 显示视图
@@ -263,7 +278,7 @@ core/
     notationDef.js fsVariants.js notationUtils.js familyInput.js errors.js i18n.js
     legacyAdapter.js drawMountainDiagram.js
 notation/
-  ne/                   记号正主（126 文件 / 229 记号，含 classic_*.js 移植批次）
+  ne/                   记号正主（清单 124 文件 / 229 记号，含 classic_*.js 移植批次）
   legacy/ rewritten/ user/   远古实现（?legacy=1 与 11 个回落的记号在用）
 ui/
   app.js                主应用（状态、导航、键盘、命令）
@@ -279,7 +294,8 @@ scripts/
   serve-nocache.mjs     本地静态服务器（禁缓存）
   verify-app-boot.mjs   ★ 应用启动：桩 React+DOM 跑一遍 App()（能抓「空白页」类回归）
   verify-expand-timeout.mjs  ★ 卡死防护：worker 里跑，超时强杀，能真正抓死循环
-  verify-loader.mjs     loader 依赖排序与注入顺序
+  verify-loader.mjs     loader 分层、并行注入、失败续载
+  verify-loader-layers.mjs  ★ 分层安全（同层乱序不得报错）
   verify-ne-integration.mjs  ne 注册表全量装载 + 冒烟
   verify-uibridge.mjs   适配层 + 全量冒烟（走 ne 引擎）
   list-notation.mjs     按清单加载并核对注册
@@ -310,12 +326,20 @@ docs/archive/           历史修复笔记归档
 ```bash
 node scripts/verify-app-boot.mjs         # ★ 应用能否启动：跑一遍 App()（桩 React+DOM）
 node scripts/verify-expand-timeout.mjs   # ★ 展开不许卡死：模板各 tier + 坏记号被上限中止
-node scripts/verify-loader.mjs          # 加载器：依赖排序 / 注入顺序 / 失败续载
-node scripts/verify-ne-integration.mjs  # ne 注册表全量装载 + 冒烟
+node scripts/verify-loader.mjs          # 加载器：依赖分层 / 并行注入 / 失败续载
+node scripts/verify-loader-layers.mjs   # ★ 分层安全：同层逆序与乱序执行不得报错
+node scripts/verify-ne-integration.mjs  # ne 注册表按清单装载 + 冒烟（口径同浏览器）
 node scripts/verify-uibridge.mjs        # 适配层（默认 ne 引擎路径）
 node scripts/verify-uibridge.mjs --legacy   # 同上，走远古实现
 node scripts/list-notation.mjs          # 按清单加载并核对注册
 ```
+
+> `verify-ne-integration.mjs` / `verify-uibridge.mjs` 现在都**读
+> `core/notation-manifest.js`** 装载 ne 记号，不再扫 `notation/ne/` 目录 ——
+> 目录里存在但清单未声明的文件（如暂时摘除的 `BM-BOCF.js`）浏览器不会加载，
+> 扫目录会让「脚本量的」比「线上跑的」多一个，两个数字长期对不上。
+> 退出码也分开了：**已知回落**（`core/ne/knownBroken.js` 里那 11 个）不算失败，
+> 其余冒烟失败、装载失败、清单声明但文件缺失才返回 1。
 
 > `verify-app-boot.mjs` 值得单独跑：它用桩 React + 桩 DOM 真的执行 `ui/app.js` 的模块体
 > 并调用 `App()`，能抓到「文件都在、语法没错、控制台零报错，但页面就是空白」这类问题

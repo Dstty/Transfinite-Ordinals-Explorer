@@ -77,8 +77,10 @@ ne 树（真相） ──rebuild()──▶ UI 根列表（{expr, low:[[]], subi
 
 ### 4.3 回落到远古的 11 个
 
-`core/ne/uiBridge.js` 的 `NE_ENGINE_BROKEN`：TON 家族 9 个（`ton-m/dr/drc/drp/drpc/i/ibp/mc/mpc`）
+`core/ne/knownBroken.js` 的 `NE_ENGINE_BROKEN_IDS`：TON 家族 9 个（`ton-m/dr/drc/drp/drpc/i/ibp/mc/mpc`）
 与 `upms-partial-8/9` —— 它们在 ne 引擎里本身就会抛错（与 ne 原版逐字同错）。
+这张表只有一份：`core/ne/uiBridge.js` 用它决定回落，`scripts/verify-ne-integration.mjs`
+用它把冒烟失败分成「已知回落」与「意外」，避免两处各写一份后漂移。
 判定要跑两个脚本（只看第一个会漏 5 个）：`verify-ne-integration.mjs`（只展开首个根节点）
 与 `.tmp-ne/verify-uiengine-all.mjs`（按 UI 真实做法连展两步）。
 
@@ -163,6 +165,23 @@ expand_item(node, notation, variant, tier)   // tier: 0 单次 / 1 沿链到底 
 边界取 `get_bound(node)`（先根遍历下一个节点）；`max_find_fs` 守卫
 「连续产出 ≤ bound 的项过多」（防基本列写错时卡死）——
 ⚠ 该守卫**只在节点无子节点时生效**，所以另配了毫秒期限（见 §7.5）。
+
+### 6.3 加载与首屏（`core/loader.js`）
+
+清单 207 条。早期是 `script.onload` 串行链，本地 RTT≈0 无感；部署到 GitHub Pages
+后等于 207 次串行往返（实测 ~330～380 ms/个 → **68～79 秒**才出首屏）。
+
+现在按 `dependsOn` **分层**：同层一次性注入（并行 / HTTP/2），层间 await。实测 4 层
+（1 / 144 / 56 / 6），同批资源并行 32 个共 713 ms，外推 **约 4.6 秒**。
+
+因此 `dependsOn` 从「排序建议」变成**硬约束**：同层无序，漏声明一个跨文件全局就会在
+加载期抛 `ReferenceError`（`TON_noraise_compare` 就是这么被抓出来的）。
+`bootstrap: true` 的条目（`notation/ne/categories.js`）独占第 0 层：它没有 dependsOn，
+分层时本来会与 ne 记号同层，而 `register_notation` 若先于 `register_category` 执行，
+注册表会去自动补分类、丢掉生成器元信息。
+
+回归两道：`verify-loader.mjs`（层结构、bootstrap 独占、app.js 最后）与
+`verify-loader-layers.mjs`（同层逆序 + 随机乱序 12 轮，必须 0 异常）。
 
 ---
 
@@ -344,7 +363,7 @@ JS 单线程：一个跑不完的循环就冻住整个页面。**实测踩到过
 | `.tmp-ne/verify-tree-ui.mjs` | 树设置面板（视图切换、等价显示开关、交互风格、滚动 5 模式、跳转成败反馈）+ `compute_scroll_delta` 各模式的几何断言 |
 | `scripts/verify-expand-timeout.mjs` | **展开不许卡死**：worker 里跑（能超时强杀），验模板各 tier 正常、坏记号被上限中止、并留「不限制就会卡死」的对照 |
 | `scripts/verify-loader.mjs` | 清单驱动加载：依赖排序、注入顺序、失败续载 |
-| `scripts/verify-ne-integration.mjs` | ne 注册表全量装载 + 冒烟 |
+| `scripts/verify-ne-integration.mjs` | ne 注册表按**清单**装载（口径同浏览器）+ 冒烟；退出码区分「已知回落」与意外失败 |
 | `scripts/verify-uibridge.mjs [--legacy]` | 适配层 + 全量冒烟（默认走 ne 引擎） |
 | `scripts/list-notation.mjs` | 按清单加载并核对注册 |
 | `.tmp-ne/verify-uiengine-all.mjs` | 218 个记号逐个核对「镜像树 == ne 树」 |

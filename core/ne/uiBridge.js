@@ -32,13 +32,15 @@
 //    FS 项完全正常」的。详见 probe() 里的四条判据。
 //
 //  切换开关：**默认就用 ne**（notation/ne/ 是记号的正主）；URL 带 `?legacy=1` 退回
-//  百分之百的远古实现。ne 引擎自己就崩的 6 个（见 NE_ENGINE_BROKEN）自动回落远古版。
+//  百分之百的远古实现。ne 引擎自己就崩的记号（core/ne/knownBroken.js）自动回落远古版 ——
+//  按 UI 真实做法连展两步共 11 个，只展一步只会暴露其中 6 个。
 //  验证：node scripts/verify-uibridge.mjs [--legacy]
 // ============================================================================
 import { deepClone } from '../engine.js';
 import * as legacy from '../register.js';
 import { get_notation as ne_get, list_notations as ne_list } from './registry.js';
 import { resolve_display } from './notationDef.js';
+import { NE_ENGINE_BROKEN_IDS } from './knownBroken.js';
 
 /**
  * 是否用 ne 记号接管同名 id。**默认开**；`?legacy=1` 关掉（退回远古实现）。
@@ -82,21 +84,9 @@ const unsafe = new Set(); // 判定为「无法安全适配」的 ne 记号 id
  *   · 原「下界判据失效」那 17 个（OCF 系 + omega-y/y-seq/mm 系 + asan 系）已放行；
  *   · 只是**旧引擎**下会挂、ne 引擎正常的（如 cocf）也已放行。
  */
-const NE_ENGINE_BROKEN = new Set([
-  // TON 家族：9 个全中（名字按 id 排序）
-  'ton-dr',
-  'ton-drc',
-  'ton-drp',
-  'ton-drpc',
-  'ton-i',
-  'ton-ibp',
-  'ton-m',
-  'ton-mc',
-  'ton-mpc',
-  // UPMS partial 高段
-  'upms-partial-8',
-  'upms-partial-9',
-]);
+// 已知会崩的 id 只写在 core/ne/knownBroken.js（自检脚本 import 同一份，
+// 避免「脚本豁免表」和「运行时回落表」各写一份、日后漂移）
+const NE_ENGINE_BROKEN = new Set(NE_ENGINE_BROKEN_IDS);
 
 /** 该记号能否安全地交给旧引擎（见文件头「核心难点」）。 */
 function probe(def) {
@@ -277,7 +267,7 @@ function meta_of(def) {
  *
  * 什么时候用：UI 现在让 ne 记号走 ne 引擎（core/ne/uiEngine.js），而 ne 引擎
  * **不需要下界**。所以「probe 猜不出下界」不再是不能用的理由 —— 只有 ne 引擎自己
- * 就崩的那 6 个（NE_ENGINE_BROKEN）才真用不了。这个薄对象只提供 ne 路径与渲染真正
+ * 就崩的那些（见 core/ne/knownBroken.js）才真用不了。这个薄对象只提供 ne 路径与渲染真正
  * 会用到的东西（display / parse / compare / _def），**故意不提供 able/semiable/FS**：
  * 万一有人误把它喂给旧引擎（例如导入的树没有 _neNode），core/engine.js 会看到
  * `typeof FS !== 'function'` 直接返回「未展开」，不会崩。

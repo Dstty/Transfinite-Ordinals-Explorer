@@ -105,13 +105,13 @@ window.NOTATION_MANIFEST = [
 
   { file: 'notation/legacy/TON-main.js',       category: 'TON',      ids: ['ton-m'] },
   { file: 'notation/legacy/TON-DoR.js',        category: 'TON',      ids: ['ton-dr'],        dependsOn: ['notation/legacy/TON-main.js'] },
-  { file: 'notation/legacy/TON-DRP.js',        category: 'TON',      ids: ['ton-drp'],       dependsOn: ['notation/legacy/TON-main.js'] },
-  { file: 'notation/legacy/TON-I.js',          category: 'TON',      ids: ['ton-i'],         dependsOn: ['notation/legacy/TON-main.js'] },
-  { file: 'notation/legacy/TON-IBP.js',        category: 'TON',      ids: ['ton-ibp'],       dependsOn: ['notation/legacy/TON-main.js'] },
+  { file: 'notation/legacy/TON-DRP.js',        category: 'TON',      ids: ['ton-drp'],       dependsOn: ['notation/legacy/TON-main.js', 'notation/legacy/TON-DoR.js'] },
+  { file: 'notation/legacy/TON-I.js',          category: 'TON',      ids: ['ton-i'],         dependsOn: ['notation/legacy/TON-main.js', 'notation/legacy/TON-DoR.js'] },
+  { file: 'notation/legacy/TON-IBP.js',        category: 'TON',      ids: ['ton-ibp'],       dependsOn: ['notation/legacy/TON-main.js', 'notation/legacy/TON-DoR.js'] },
   { file: 'notation/legacy/TON-MC.js',         category: 'TON',      ids: ['ton-mc'],        dependsOn: ['notation/legacy/TON-main.js'] },
   { file: 'notation/legacy/TON-MPC.js',        category: 'TON',      ids: ['ton-mpc'],       dependsOn: ['notation/legacy/TON-main.js'] },
-  { file: 'notation/legacy/TON-DRC.js',        category: 'TON',      ids: ['ton-drc'],       dependsOn: ['notation/legacy/TON-main.js'] },
-  { file: 'notation/legacy/TON-DRPC.js',       category: 'TON',      ids: ['ton-drpc'],      dependsOn: ['notation/legacy/TON-main.js'] },
+  { file: 'notation/legacy/TON-DRC.js',        category: 'TON',      ids: ['ton-drc'],       dependsOn: ['notation/legacy/TON-main.js', 'notation/legacy/TON-DoR.js'] },
+  { file: 'notation/legacy/TON-DRPC.js',       category: 'TON',      ids: ['ton-drpc'],      dependsOn: ['notation/legacy/TON-main.js', 'notation/legacy/TON-DoR.js'] },
 
   { file: 'notation/legacy/aSAN-1.js',         category: 'aSAN 数列', ids: ['asan-1'] },
   { file: 'notation/legacy/aSAN-2.js',         category: 'aSAN 数列', ids: ['asan-2'],       dependsOn: ['notation/legacy/aSAN-1.js'] },
@@ -142,7 +142,7 @@ window.NOTATION_MANIFEST = [
   //    window.register（远古接口）。所以同一 id 会同时存在于两边——暂不冲突，
   //    UI 切到新注册表（阶段四）时再停用上面 rewritten/ 里的旧条目。
   // --------------------------------------------------------------------------
-  { file: 'notation/ne/categories.js',       category: '(ne 分类骨架)', ids: [], module: true, note: 'ne 分类树（纯容器分类）' },
+  { file: 'notation/ne/categories.js',       category: '(ne 分类骨架)', ids: [], module: true, bootstrap: true, note: 'ne 分类树（纯容器分类）' },
   { file: 'notation/ne/Omega.js',            category: '基础序列系统', ids: ['omega'], module: true, note: 'ne 原生：自然数 ω' },
   { file: 'notation/ne/Minus1_Y_nSS.js',     category: 'Y 序列', ids: ['-1y-1ss'], module: true, note: 'ne 原生：(-1)Y-nSS 家族（-1y-1ss..6ss，generator start=0）' },
   { file: 'notation/ne/T_Minus1_Y_nSS.js',   category: 'Y 序列', ids: ['t--1y-1ss'], module: true, note: 'ne 原生：T(-1)Y-nSS 家族（t--1y-1ss..6ss）' },
