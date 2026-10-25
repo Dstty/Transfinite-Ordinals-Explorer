@@ -25,9 +25,9 @@
 //      该设置默认为 0，只有用户手动调大时才会察觉。
 //    · 旧引擎的 tier 与 ne 的 tier 语义基本对齐（0=展开一次，1=沿链到底，≥2=多层）。
 // ============================================================================
-import { expand_item, set_expand_deadline, clear_expand_deadline } from './expander.js';
-import { default_FS_variant, resolve_FS } from './fsVariants.js';
-import { create_node, find_prev, get_bound, init_dataset } from './tree.js';
+import { expand_item, preview_expand, set_expand_deadline, clear_expand_deadline } from './expander.js';
+import { default_FS_variant } from './fsVariants.js';
+import { create_node, find_prev, init_dataset } from './tree.js';
 
 /** 该记号是否走 ne 引擎（适配层接管的 ne 记号都走）。 */
 export function is_ne(notation) {
@@ -63,12 +63,19 @@ function root_of(neNode) {
   return n;
 }
 
-/**
- * 建树（ne 路径）。
- * @param {object} notation 适配层给的旧式对象（带 _def）
- * @param {*} expr 给定则用它当唯一根；不给则用 def.init() 的示例列表
- * @returns {Array} 旧式形状的根列表（节点带 _neNode）
- */
+// Entries are already sorted by the importer; preserve their notes and order.
+export function make_tree_from_entries(entries) {
+  const container = { expr: null, children: [], parent: null, index: -1 };
+  entries.forEach((entry, index) => container.children.push(create_node(entry.expr, container, index)));
+  const result = [];
+  rebuild(container, result);
+  result.forEach((node, index) => {
+    if (entries[index].note) node.note = entries[index].note;
+  });
+  return result;
+}
+
+/** Build an initial native dataset or a single-expression tree. */
 export function make_tree(notation, expr) {
   const def = notation._def;
   let container;
@@ -107,38 +114,9 @@ export function make_tree(notation, expr) {
 export function can_expand_ne(notation, uiNode) {
   if (!is_ne(notation) || !uiNode || !uiNode._neNode) return null;
   const def = notation._def;
-  const node = uiNode._neNode;
-  const variant = default_FS_variant(def);
-  let fs;
-  try {
-    fs = resolve_FS(def, variant);
-  } catch {
-    return false;
-  }
-  if (typeof fs !== 'function') return false;
-  const bound = get_bound(node);
-  try {
-    if (def.is_limit(node.expr)) {
-      let i = node.fs_state && node.fs_state.variant === variant ? node.fs_state.index + 1 : 0;
-      for (let k = 0; k < MAX_EXPAND_TRIES; k++, i++) {
-        const res = fs(node.expr, i);
-        if (res === undefined || res === null) return false;
-        if (bound === undefined || def.compare(res, bound) > 0) return true;
-      }
-      return false;
-    }
-    const res = fs(node.expr, 0);
-    if (res === undefined || res === null) return false;
-    if (def.compare(res, node.expr) >= 0) return false;
-    if (bound !== undefined && def.compare(res, bound) <= 0) return false;
-    return true;
-  } catch {
-    return false; // 判据本身抛错（病态记号）→ 当作展不动，宁可少显示一个 [+]
-  }
+  const verdict = preview_expand(uiNode._neNode, def, default_FS_variant(def));
+  return verdict !== false;
 }
-
-/** 判定时的试展开上限（与 expander 的 max_find_fs 同量级；只用于显示判定）。 */
-const MAX_EXPAND_TRIES = 32;
 
 /**
  * 展开一次（ne 引擎），随后把整棵 ne 树镜像回 rootList。
@@ -241,17 +219,17 @@ export function expand_ne(notation, rootList, uiNode, tier, extra, timeLimitMs) 
   if (!is_ne(notation) || !uiNode || !uiNode._neNode) return null;
   const def = notation._def;
   // 期限用 try/finally 兜住：抛错（超时 / 试展开过多）也必须清掉，否则会污染后续展开
+  const container = root_of(uiNode._neNode);
   set_expand_deadline(timeLimitMs);
   try {
     const created = expand_item(uiNode._neNode, def, default_FS_variant(def), tier);
-    const container = root_of(uiNode._neNode);
-    if (container) rebuild(container, rootList);
     if (extra) {
       // 有意忽略：ne 引擎没有「在节点前补额外 FS 项」的概念（见文件头说明）
     }
     return { changed: !!created, created: created ?? null };
   } finally {
     clear_expand_deadline();
+    if (container) rebuild(container, rootList);
   }
 }
 

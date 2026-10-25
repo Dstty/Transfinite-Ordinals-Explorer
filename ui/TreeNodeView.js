@@ -65,7 +65,8 @@ export function renderDisplay(notation, expr) {
 export function TreeNodeView(props) {
   const { rootList, notation, displayFn, treeIndex, theme, focusUid,
     onToggle, onMore, startNote, editingNote, saveNote, cancelNoteEditing, onFocusRow, onNoteCommitted,
-    scrollMode, extraViews, noteWidth, onNoteChange, onNoteWidth, treeStyle, wrapLong, compareDisplay } = props;
+    scrollMode, extraViews, noteWidth, onNoteChange, onNoteWidth, treeStyle, wrapLong, compareDisplay,
+    noteFocusSeq } = props;
   // 节点文本：视图切换时用 displayFn（纯显示翻译），展开/折叠逻辑仍用原记号；
   // 视图 display 可能对非法表达式抛错，统一容错回退 String
   const nodeLabel = (expr) => {
@@ -93,6 +94,17 @@ export function TreeNodeView(props) {
   // 焦点行滚动跟随：策略由该棵树的设置决定（不跟 / 仅到边界 / 始终·中上·中间·顶部）。
   // 这里算增量而不是用 scrollIntoView —— 后者只能"刚好可见"，做不到固定位置。
   const focusRef = React.useRef(null);
+
+  // ner 样式：键盘移动后用 noteFocusSeq 通知，把光标送进目标行的注释框。
+  // 只在计数变化时触发，点击行不会抢焦点。
+  React.useEffect(() => {
+    if (treeStyle !== 'ner' || !noteFocusSeq) return;
+    const el = typeof document !== 'undefined' && document.querySelector
+      ? document.querySelector(`[data-note-uid="${focusUid}"]`)
+      : null;
+    if (el && typeof el.focus === 'function') el.focus();
+  }, [noteFocusSeq, focusUid, treeStyle]);
+
   React.useEffect(() => {
     const el = focusRef.current;
     if (!el || typeof el.getBoundingClientRect !== 'function') return;
@@ -174,7 +186,7 @@ export function TreeNodeView(props) {
     const handleCollapseClick = (e) => {
       e.stopPropagation();
       if (hasChildren) {
-        item._collapsed = true;
+        item._collapsed = !collapsed;
         if (props.onRefresh) props.onRefresh();
       }
     };
@@ -341,11 +353,14 @@ export function TreeNodeView(props) {
 
     const noteInputEl = (place) => React.createElement("input", {
       key: `note-${uid}-${note || ""}`,
+      'data-tree-note': '1',
+      'data-note-uid': String(uid),
       ref: (el) => { if (isEditing && el && document.activeElement !== el) el.focus(); },
       defaultValue: note || "",
       placeholder: "注释…",
       title: "注释（直接输入即可，树里会保存）",
       onClick: (e) => e.stopPropagation(),
+      onFocus: () => { if (props.onSelectRow) props.onSelectRow(treeIndex, uid); },
       onChange: (e) => { if (onNoteChange) onNoteChange(treeIndex, uid, e.target.value); },
       onKeyDown: (e) => {
         if (e.key === "Enter" || e.key === "Escape") {

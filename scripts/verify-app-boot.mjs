@@ -233,6 +233,61 @@ if (inputEl) {
   }
 }
 
+// Exercise real App callbacks after selecting a tree row.
+{
+  let t = renderApp();
+  for (const panel of t.filter(e => typeof e.type === 'function' && ['TreeSettings', 'NotationEditor'].includes(e.type.name))) {
+    panel.props.onClose();
+  }
+  t = renderApp();
+  const getTree = () => t.find(e => typeof e.type === 'function' && e.type.name === 'TreeNodeView');
+  let view = getTree();
+  check(!!view, 'tree interaction fixture missing');
+  if (view) {
+    const rootNode = view.props.rootList[0];
+    view.props.onFocusRow(view.props.treeIndex, rootNode._uid);
+    t = renderApp();
+    const container = t.find(e => e.type === 'div' && e.props.tabIndex === 0 && e.props.onKeyDown);
+    try {
+      container.props.onKeyDown({ key: 'ArrowDown', preventDefault() {}, target: { tagName: 'DIV' } });
+    } catch (e) { failures.push('tree keyboard: ' + e.message); }
+    t = renderApp();
+    const settings = t.find(e => e.type === 'button' && e.children.includes('⚙️ 树设置'));
+    settings.props.onClick();
+    t = renderApp();
+    const panel = t.find(e => typeof e.type === 'function' && e.type.name === 'TreeSettings');
+    try {
+      const result = await panel.props.onJump('0,1', 0, 'nav');
+      check(result && result.ok, 'jump to parsed existing expression failed: ' + result?.message);
+    } catch (e) { failures.push('tree jump: ' + e.message); }
+    panel.props.onClose();
+    t = renderApp();
+    view = getTree();
+    try { view.props.onMore(-999); } catch (e) { failures.push('unknown node expansion: ' + e.message); }
+    const roots = view.props.rootList;
+    const selected = roots[0];
+    view.props.onFocusRow(view.props.treeIndex, selected._uid);
+    roots.unshift({ expr: selected.expr, low: [[]], subitems: [] });
+    t = renderApp();
+    view = getTree();
+    check(view.props.focusUid === selected._uid, 'inserting earlier nodes moved selection');
+    roots.shift();
+    const hidden = { expr: selected.expr, low: [[]], subitems: [] };
+    selected.subitems.push(hidden);
+    selected._collapsed = true;
+    t = renderApp();
+    view = getTree();
+    view.props.onFocusRow(view.props.treeIndex, selected._uid);
+    t = renderApp();
+    const keyboard = t.find(e => e.type === 'div' && e.props.tabIndex === 0 && e.props.onKeyDown);
+    keyboard.props.onKeyDown({ key: 'ArrowDown', preventDefault() {}, target: { tagName: 'DIV' } });
+    t = renderApp();
+    check(getTree().props.focusUid !== hidden._uid, 'keyboard selected a collapsed descendant');
+    selected.subitems.pop();
+    selected._collapsed = false;
+  }
+}
+
 console.log(`App() 渲染：元素 ${els.length} 个，effect ${effects.length} 个`);
 
 if (failures.length) {

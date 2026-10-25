@@ -73,7 +73,7 @@ function is_last_child(node) {
   return p !== null && p.children[p.children.length - 1].index === node.index;
 }
 
-function generate_fs(node, ctx, bound) {
+function generate_fs(node, ctx, bound, preview = false) {
   const { notation, variant, fs } = ctx;
   let i;
   if (node.fs_state && node.fs_state.variant === variant) {
@@ -86,14 +86,16 @@ function generate_fs(node, ctx, bound) {
   // 避免合法多次展开误触发。
   let consecutive_reject = 0;
   let guard = 0; // 超时检查节流：每 64 次循环查一次时钟（Date.now 不算贵，但没必要每次）
+  const previewDeadline = preview ? Date.now() + 8 : 0;
   while (true) {
+    if (preview && (guard >= 256 || Date.now() > previewDeadline)) return PREVIEW_UNKNOWN;
     if ((guard++ & 63) === 0) check_deadline();
     if (node.children.length === 0 && consecutive_reject > max_find_fs_value) {
       throw new FsTrialExpansionError('当前节点试展开次数过多，可能基本列实现有误');
     }
     const res = fs(node.expr, i);
     if (bound === undefined || notation.compare(res, bound) > 0) {
-      node.fs_state = { variant, index: i };
+      if (!preview) node.fs_state = { variant, index: i };
       return res;
     }
     i++;
@@ -106,18 +108,32 @@ function generate_fs(node, ctx, bound) {
  * 无法展开时返回 undefined（此时上层链停住）：非 limit 后继只能展开出 x 一次、
  * 0 不能展开、或结果不在 bound 之上（病态 gap 视同无法展开）。
  */
-function expand_single(node, ctx, as_sibling) {
+const PREVIEW_UNKNOWN = Symbol('preview-budget');
+
+function next_expression(node, ctx, preview = false) {
   const { notation, fs } = ctx;
   const bound = get_bound(node);
+  if (notation.is_limit(node.expr)) return generate_fs(node, ctx, bound, preview);
+  const result = fs(node.expr, 0);
+  if (notation.compare(result, node.expr) >= 0) return undefined;
+  if (bound !== undefined && notation.compare(result, bound) <= 0) return undefined;
+  return result;
+}
 
-  let result_expr;
-  if (notation.is_limit(node.expr)) {
-    result_expr = generate_fs(node, ctx, bound);
-  } else {
-    result_expr = fs(node.expr, 0);
-    if (notation.compare(result_expr, node.expr) >= 0) return undefined;
-    if (bound !== undefined && notation.compare(result_expr, bound) <= 0) return undefined;
+// null means the bounded preview needs an explicit expansion attempt.
+export function preview_expand(node, notation, variant) {
+  try {
+    const result = next_expression(node, make_ctx(notation, variant), true);
+    return result === PREVIEW_UNKNOWN ? null : result !== undefined;
+  } catch {
+    return false;
   }
+}
+
+function expand_single(node, ctx, as_sibling) {
+  const { notation } = ctx;
+  const result_expr = next_expression(node, ctx);
+  if (result_expr === undefined) return undefined;
 
   // debug_verification（仅记号定义时生效）：校验失败仅打印警告，节点照常创建。
   if (notation.debug_verification) {

@@ -34,6 +34,7 @@ import { buildNotationList, countNotationsForDisplay } from './notationList.js';
 import { NotationEditor } from './NotationEditor.js';
 import { load_settings, save_settings, load_theme, save_theme } from './persistedSettings.js';
 import { set_max_find_fs } from '../core/ne/expander.js';
+import { default_FS_variant, resolve_FS } from '../core/ne/fsVariants.js';
 import { TreeSettings, DEFAULT_TREE_CFG } from './TreeSettings.js';
 import { search_target, find_in_tree, find_expr_in_tree, resolve_from_display } from '../core/ne/targetSearch.js';
 import { HELP_LINES } from './helpText.js';
@@ -130,7 +131,9 @@ const [settings, setSettings] = React.useState(() => load_settings());
   React.useEffect(() => { save_theme(themeKey); }, [themeKey]);
   // 「最大搜索基本列项数、 展开引擎的试展开上限（ne-rewritten 的同名参数），改设置即生敁
 React.useEffect(() => { try { set_max_find_fs(settings.maxFindFs); } catch {} }, [settings.maxFindFs]);
-  const [focusIdx, setFocusIdx] = React.useState(-1);
+  const [focusTarget, setFocusTarget] = React.useState(null);
+  // 每次键盘移动递增；ner 样式据此把焦点送进目标行的注释框（在注释框之间跳转）
+  const [noteFocusSeq, setNoteFocusSeq] = React.useState(0);
   const [editingNote, setEditingNote] = React.useState(null);
   const [showSettings, setShowSettings] = React.useState(false);
   // — 自定义记号编辑面板（/notation 命令弹出；状态都在 ui/NotationEditor.js 里）—
@@ -227,12 +230,13 @@ React.useEffect(() => {
     const walk = (entry, list, ancestors) => {
       for (const node of list) {
         nav.push({ type: 'node', entry, item: node, uid: node._uid, treeIndex: entry.treeIndex, ancestors });
-        if (node.subitems && node.subitems.length > 0) {
+        if (!node._collapsed && node.subitems && node.subitems.length > 0) {
           walk(entry, node.subitems, ancestors.concat(node._uid));
     }
     }
     };
     for (const entry of treeEntries) {
+      if (entry.collapsed) continue;
       ensureUids(entry.rootList);
       walk(entry, entry.rootList, []);
     }
@@ -242,11 +246,24 @@ React.useEffect(() => {
 
   const navItems = React.useMemo(() => collectNavItems(), [collectNavItems, version]);
 
-  /** focusIdx 钳制到有效范围、*/
+  // Keep selection attached to a node when expansion inserts earlier rows.
   const clampedFocus = React.useMemo(() => {
-    if (focusIdx < 0 || navItems.length === 0) return -1;
-    return Math.min(focusIdx, navItems.length - 1);
-  }, [focusIdx, navItems.length]);
+    if (!focusTarget) return -1;
+    const idx = navItems.findIndex((n) => focusTarget.type === 'input'
+      ? n.type === 'input'
+      : n.type === 'node' && n.treeIndex === focusTarget.treeIndex && n.uid === focusTarget.uid);
+    if (idx >= 0) return idx;
+    for (const uid of [...(focusTarget.ancestors || [])].reverse()) {
+      const parent = navItems.findIndex((n) => n.type === 'node' && n.treeIndex === focusTarget.treeIndex && n.uid === uid);
+      if (parent >= 0) return parent;
+    }
+    return -1;
+  }, [focusTarget, navItems]);
+
+  const setFocusIdx = React.useCallback((idx) => {
+    const n = collectNavItems()[idx];
+    setFocusTarget(n ? { type: n.type, treeIndex: n.treeIndex, uid: n.uid, ancestors: n.ancestors } : null);
+  }, [collectNavItems]);
 
   const focusedItem = clampedFocus >= 0 ? navItems[clampedFocus] : null;
 
@@ -273,7 +290,7 @@ React.useEffect(() => {
 
   /** 取某棵树当前视图的视图对象（可能有自币from_display 走display spec）、*/
   const activeViewFor = React.useCallback((entry) => {
-      const views = resolveTreeViews(item.notation.id);
+    const views = resolveTreeViews(entry.notation.id);
     const cur = entry.viewId || undefined;
     return views.find((v) => v.id === cur) || views[0] || null;
   }, []);
@@ -281,120 +298,8 @@ React.useEffect(() => {
   /** 当前焦点所在树的配置（焦点不在树上时用默认）、*/
   const focusedTreeCfg = React.useCallback(() => {
     const it = navItems[clampedFocus];
-    if (!it || it.treeIndex === undefined) return { ...DEFAULT_TREE_CFG };
-    const entry = items.find((x) => x.type === 'tree' && x.treeIndex === it.treeIndex);
-    // ⑁树里已有（按显示文本！
-const inTree = find_in_tree(entry.rootList, def, want);
-    if (inTree && inTree.node) {
-      ensureUids(entry.rootList);
-      const ok = focusNodeByUid(entry, inTree.node._uid);
-      refreshUI();
-      return ok
-        ? { ok: true, message: `树里已有这个节点（深庁${inTree.depth}），已定位` }
-        : { ok: false, message: '找到了节点但定位失败（导航序列里没有它）' };
-    }
-
-    // ⑁**解析 + 导航**（ner / ne-rewritten 的做法）：用 display spec 走from_display 把文朁    //    解析回表达式（瞬间），再煁its import_analysis_eager 在树上按 compare 导航、    //    优先用当前视图的 display spec（它可能自带 from_display，比妁BMS 走OCF 视图）、    //    mode === 'search' 时跳过这一步，直接赁⑁的枚举搜索、
-const spec = (activeViewFor(entry) || {}).display || def.display;
-    const parsed = mode === 'search' ? { ok: false, reason: 'skipped' } : resolve_from_display(spec, want);
-    if (parsed.ok) {
-      // ner 走ExpandDialog 还带一丁FS 序号（从 1 起）：取该表达式的第 n 个基本列顁
-let target = parsed.expr;
-      let seqNote = '';
-      const seq = Number(fsIndex) || 0;
-      if (seq > 0) {
-        if (typeof def.is_limit === 'function' && def.is_limit(target)) {
-  try {
-            target = def.FS(target, seq - 1);
-            seqNote = `（取其第 ${seq} 个基本列项）`;
-    } catch (e) {
-            return { ok: false, message: `解析成功，但取第 ${seq} 个基本列项失败：${e.message}` };
-    }
-    } else {
-          return { ok: false, message: '解析成功，但该表达式不是极限式，没有基本列项可取' };
-    }
-    }
-      // 树上按表达式相等靠
-const hit = find_expr_in_tree(entry.rootList, def, target);
-      if (hit && hit.node) {
-      ensureUids(entry.rootList);
-        const ok = focusNodeByUid(entry, hit.node._uid);
-      refreshUI();
-        return ok
-          ? { ok: true, message: `解析到目栁{seqNote}，树里已有（深度 ${hit.depth}），已定位` }
-          : { ok: false, message: '找到了节点但定位失败' };
-    }
-      // 树里没有 ↁ**同 ne-rewritten 导航**：用 compare 在树上走、按需现场展开
-      // ！ ner 走import_analysis_eager：相等命丁/ 偏大就展开 / 偏小就往前挪！      //   起点取树末最小项，因丁ne 树的先根序是递减的）
-      const nav = navigate_to_target(entry.notation, entry.rootList, target, {
-        maxSteps: 4000,
-        timeLimitMs: settings.timeLimit,
-  });
-      ensureUids(entry.rootList);
-      if (nav.found && nav.node) {
-        const ok = focusNodeByUid(entry, nav.node._uid);
-      refreshUI();
-        return ok
-          ? { ok: true, message: `解析到目栁{seqNote}，导舁${nav.steps} 步命中并定位（过程中按需展开了节点）` }
-          : { ok: false, message: '导航命中但定位失败' };
-    }
-      const whyText = {
-        'expand-failed': '中途展开不动了（试展开守卫）—— 目标大概不是标准项',
-        'no-prev': '已经走到树的最前面还是比目标小',
-        'no-start': '这棵树上没有可用作起点的节点（先在树上展开一次）',
-        'max-steps': '走了太多步（4000）仍未命中，目标可能太远',
-      }[nav.reason] || nav.reason;
-      return {
-        ok: false,
-        message:
-          `解析成功，但导航 ${nav.steps} 步后没命中：${whyText}。\n` +
-          '非标准式跳转失败是正常现象（ne-rewritten 的说明里也是这么写的）。' +
-          '若确认它是标准项，可以点「搜索兜底」。',
-    };
-    }
-
-    // ⑁解析不了 / 显式要求搜索 ↁ兜底枚举搜索（BFS 先浅后深），并说明原囁
-const seeds = entry.rootList.map((n) => n.expr);
-    const r = search_target(def, seeds, want, { maxMs: settings.searchMs, maxNodes: 20000 });
-    if (!r.found) {
-      return {
-        ok: false,
-        message:
-          (mode === 'search'
-            ? '（你点了「搜索兜底」）'
-            : parsed.reason === 'no-from-display'
-              ? '该记号没有 from_display（无法把显示文本解析回表达式），只能用搜索 —— '
-              : `解析失败（${parsed.error || '输入不是该记号的合法显示文本'}），改用搜索 — `) + r.reason,
-    };
-    }
-
-  // 下拉高亮项（钳制到有效范围）
-    let node = entry.rootList[r.seedIndex];
-    if (!node) return { ok: false, message: '搜索给了一个不存在的起点（内部错误）' };
-    for (let k = 0; k < r.path.length; k++) {
-      const res = expand_ne(entry.notation, entry.rootList, node, 0, 0, settings.timeLimit);
-      if (!res || !res.changed) {
-        return {
-          ok: false,
-          message: `重放到第 ${k + 1}/${r.path.length} 步就停了（这条路上有更大的兄弟节点挡着）。` +
-              '可以先手动把那部分展开几次，再跳一次。',
-    };
-    }
-      const created = ui_node_of(entry.rootList, res.created);
-      if (!created) return { ok: false, message: '重放时找不到新建的节点（内部错误）' };
-      node = created;
-    }
-    const got = String(def.display.plain(node.expr));
-    if (got !== want) {
-      return { ok: false, message: `重放停在、{got}」而不是、{want}」— 树上的上界与搜索路径不一致（该记号在树中的展开受兄弟节点影响）` };
-    }
-      ensureUids(entry.rootList);
-    const ok = focusNodeByUid(entry, node._uid);
-      refreshUI();
-    return ok
-      ? { ok: true, message: `已定位（${r.path.length} 步，访问 ${r.visited} 项，用时 ${r.ms} ms）` }
-      : { ok: false, message: '定位失败（导航序列里没有新节点）' };
-  }, [settings.timeLimit]);
+    return getTreeCfg(it && it.entry);
+  }, [navItems, clampedFocus, getTreeCfg]);
 
   // ----- 输出流 -----
   // ne 记号走 ne 引擎（返回非 null 即为已处理）；其余走旧引擎，行为一字未改、  // 任何一侧抛错都**不能把整个交互打斁*：记号是第三方算法（ne 上游就有若干会抛的）！  // 所以这里兜住并变成一条提示。用户要的是「能展开的展开、不能的告诉我为什么」、  // 展开还给一个毫秒上限（settings.timeLimit，默认5000！=不限）：跑不完的循环会把
@@ -416,9 +321,11 @@ const expand_entry = React.useCallback((entry, parentList, node, tier, extra) =>
     } else {
         addOutput(`展开失败（该记号在此表达式/层级下抛错）：${e.message}`, 'error');
     }
-      return { changed: false };
+      ensureUids(entry.rootList);
+      refreshUI();
+      return { changed: false, partial: true };
     }
-  }, [addOutput, settings.timeLimit]);
+  }, [addOutput, settings.timeLimit, refreshUI]);
 
   const doExpand = React.useCallback((entry, node, tier, extra) => {
     const parentList = findParentList(entry.rootList, node) || entry.rootList;
@@ -443,17 +350,29 @@ const expand_entry = React.useCallback((entry, parentList, node, tier, extra) =>
       const found = findNodeByUid(entry.rootList, uid);
       if (found) { doExpand(entry, found, settings.tier, settings.additionalExpand); return; }
     }
-    return entry ? getTreeCfg(entry) : { ...DEFAULT_TREE_CFG };
-  }, [navItems, clampedFocus, items, getTreeCfg]);
+  }, [treeEntries, doExpand, settings.tier, settings.additionalExpand]);
 
   // ----- 输出流 -----
   // 实现圁ui/TreeNodeView.js（那边握着聚焦行的 DOM）：按该棵树的策略算滚动增量、  // 这里只负责把策略传下去。用户要求：按上下键时屏幕是否跟隁— 仅到边界 / 始终（中上·中间·顶部）、
   /** 把焦点移到某个节点（跳转用）：先保证 uid 存在，再找它在导航序列里的下标、*/
   const focusNodeByUid = React.useCallback((entry, uid) => {
-    const idx = navItems.findIndex((x) => x.type === 'node' && x.treeIndex === entry.treeIndex && x.uid === uid);
-      if (idx >= 0) setFocusIdx(idx);
-    return idx >= 0;
-  }, [navItems]);
+    const reveal = (list) => {
+      for (const node of list) {
+        if (node._uid === uid) return true;
+        if (node.subitems && reveal(node.subitems)) {
+          node._collapsed = false;
+          return true;
+        }
+      }
+      return false;
+    };
+    if (!reveal(entry.rootList)) return false;
+    if (entry.collapsed) setItems((prev) => prev.map((it) => it.id === entry.id ? { ...it, collapsed: false } : it));
+    ensureUids(entry.rootList);
+    setFocusTarget({ type: 'node', treeIndex: entry.treeIndex, uid });
+    refreshUI();
+    return true;
+  }, [refreshUI]);
 
 /**
    * 跳转到目标显示文本（树设置里的「跳转」）、   *   ⑁先在**已有的树**里找 ↁ直接定位！   *   ⑁没有就从各根出发沿基本列搜索（纯表达式搜索，不改树）！   *   ⑁命中后把路径在真树上重放（逐层 expand_ne），最后核对文本并定位、   * 全程不改动用户的树（除了重放确实要展开的那些步），失败时给明确原因、   */
@@ -499,7 +418,15 @@ const setNoteText = React.useCallback((treeIndex, uid, text) => {
       setFocusIdx(idx);
       containerRef.current?.focus();
     }
-  }, [collectNavItems]);
+  }, [collectNavItems, setFocusIdx]);
+
+  // 行内注释框获得焦点时只同步"选中行"，不把焦点抢回容器（否则点进输入框就打不了字）。
+  // 少了这一步，第一次点进某行注释框时选中行还是旧的，↑↓ 会从错误的位置开始走。
+  const onSelectRow = React.useCallback((treeIndex, uid) => {
+    const nav = collectNavItems();
+    const idx = nav.findIndex(n => n.type === 'node' && n.uid === uid && n.treeIndex === treeIndex);
+    if (idx >= 0) setFocusIdx(idx);
+  }, [collectNavItems, setFocusIdx]);
 
   // 注释编辑完成（Enter）或取消（Esc）后，把焦点还给容器！  // 避免 input 卸载后焦点掉刁body 导致 ↑↓ 变成页面滚动
   const onNoteCommitted = React.useCallback(() => {
@@ -1063,10 +990,13 @@ handleTreeCommand(raw);
   // ==========================================================================
   const handleGlobalKey = React.useCallback((e) => {
     // — 在「非主输入框」的表单控件里打字时，不要被导航快捷键抢赁—     //   弹窗里的 textarea/input 最怕这个：'n' 会去开注释、数字会去送FS 项、    //   方向键会去导航。主输入框（inputRef）不在此列，它的既有行为要保持、
-const t = e.target;
+    const t = e.target;
     const inForm = t && t !== inputRef.current &&
       (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-    if (inForm && e.key !== 'Escape') return;
+    // Row note boxes are permanent inputs inside the tree; arrows must still navigate.
+    const treeNote = !!(t && t.dataset && t.dataset.treeNote === '1');
+    const arrowKey = e.key === 'ArrowUp' || e.key === 'ArrowDown';
+    if (inForm && !(treeNote && arrowKey) && e.key !== 'Escape') return;
 
     // — 注释编辑中：↑↓ 保存并导航，Esc 取消 —
 if (editingNote) {
@@ -1102,17 +1032,21 @@ if (editingNote) {
       return;
     }
 
-    // 输入框聚焦时：↑ 回到最后一个节炁
-if (document.activeElement === inputRef.current) {
-      if (e.key === 'ArrowUp' && total > 1) {
-        setFocusIdx(total - 2);
+    // 输入框聚焦时：↑ 回到最后一个节点，↓ 进到第一个节点
+if (inputRef.current && document.activeElement === inputRef.current) {
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && total > 1) {
+        // 还没有选中行时，focusedTreeCfg() 会回落成默认样式；这里改看实际要进入的那棵树
+        const firstNode = nav.find((n) => n.type === 'node');
+        const targetStyle = firstNode ? getTreeCfg(firstNode.entry).style : 'mine';
+        setFocusIdx(e.key === 'ArrowUp' ? total - 2 : 0);
         inputRef.current?.blur();
-      containerRef.current?.focus();
+        // ner 样式没有"树容器焦点"这个概念：焦点直接落到目标行的注释框
+        if (targetStyle === 'ner') setNoteFocusSeq((n) => n + 1);
+        else containerRef.current?.focus();
         e.preventDefault();
     }
       return;
     }
-
     // — 交互风格：按焦点所在树的设置过滤按键（三档，键位各自照源码来）—     //   selfne（自助版 NE-4.8.1）：树上基本只有鼠标 ↁ陁Esc 外都不抢十    //   ner（ne-rewritten）：↑↓ 移动 · Enter 单次展开 · Shift+Enter 一层展开 · Ctrl+H 折叠/展开子项 · Esc
     //   mine（本工具）：下面全部快捷锁
 const kbdStyle = focusedTreeCfg().style;
@@ -1176,11 +1110,14 @@ if (item?.type === 'node' && item.item && item.item.subitems && item.item.subite
       const next = cur < 0 ? 0 : Math.min(cur + 1, total - 1);
         setFocusIdx(next);
         if (nav[next]?.type === 'input') inputRef.current?.focus();
+        else if (kbdStyle === 'ner') setNoteFocusSeq((n) => n + 1);
+        else containerRef.current?.focus();
         e.preventDefault();
     } else if (e.key === 'ArrowUp' || e.key === 'k') {
       const next = cur <= 0 ? 0 : cur - 1;
         setFocusIdx(next);
         if (nav[next]?.type === 'input') inputRef.current?.focus();
+      else if (kbdStyle === 'ner') setNoteFocusSeq((n) => n + 1);
       else { inputRef.current?.blur(); containerRef.current?.focus(); }
         e.preventDefault();
     } else if (e.key === 'ArrowRight' || e.key === 'l') {
@@ -1232,7 +1169,7 @@ if (item?.type === 'node') {
     } else if (/^[0-9]$/.test(e.key)) {
       if (goSibling(parseInt(e.key, 10))) e.preventDefault();
     }
-  }, [editingNote, collectNavItems, clampedFocus, refreshUI, doExpand, startNote, onMore, saveNote, findParentList]);
+  }, [editingNote, collectNavItems, clampedFocus, refreshUI, doExpand, startNote, onMore, saveNote, focusedTreeCfg, getTreeCfg, setFocusIdx]);
 
   // ==========================================================================
 //  职责：状态管理、输入处理、键盘导航、命令分发、主渲染。
@@ -1349,10 +1286,12 @@ React.createElement("button", {
             saveNote,
             cancelNoteEditing,
             onFocusRow,
+            onSelectRow,
             onNoteCommitted,
             onRefresh: refreshUI,
             // — 单棵树的配置 —             // 滚动跟随策略（不跁/ 仅到边界 / 始终·中上·中间·顶部）由 TreeNodeView 执行
             scrollMode: getTreeCfg(item).scrollFollow,
+            noteFocusSeq,
             noteWidth: settings.noteWidth,
             onNoteWidth: (w) => setSettings((s2) => ({ ...s2, noteWidth: w })),
             compareDisplay: (() => {
@@ -1443,6 +1382,7 @@ React.createElement("button", {
   }, [addOutput]);
 
   const jumpToTarget = React.useCallback((entry, text, fsIndex, mode) => {
+    try {
     const def = entry.notation && entry.notation._def;
     if (!def) return { ok: false, message: '这棵树不是 ne 记号，跳转暂不支持（只有 ne 记号能解析/搜索）' };
     const want = String(text || '').trim();
@@ -1481,7 +1421,7 @@ React.createElement("button", {
       if (seq > 0) {
         if (typeof def.is_limit === 'function' && def.is_limit(target)) {
           try {
-            target = def.FS(target, seq - 1);
+            target = resolve_FS(def, default_FS_variant(def))(target, seq - 1);
             seqNote = `（取其第 ${seq} 个基本列项）`;
           } catch (e) {
             return { ok: false, message: `解析成功，但取第 ${seq} 个基本列项失败：${e.message}` };
@@ -1504,6 +1444,7 @@ React.createElement("button", {
         timeLimitMs: settings.timeLimit,
       });
       ensureUids(entry.rootList);
+      refreshUI();
       if (nav.found && nav.node) {
         const ok = focusNodeByUid(entry, nav.node._uid);
         refreshUI();
@@ -1563,7 +1504,11 @@ React.createElement("button", {
     return ok
       ? { ok: true, message: `搜索到目标（重放 ${r.path.length} 步完成），已定位` }
       : { ok: false, message: '搜索命中但定位失败' };
-  }, [settings.timeLimit, settings.searchMs]);
+    } finally {
+      ensureUids(entry.rootList);
+      refreshUI();
+    }
+  }, [settings.timeLimit, settings.searchMs, activeViewFor, focusNodeByUid, refreshUI]);
 
   const doJumpFocusedTree = React.useCallback((mode) => {
     const text = String(jumpText || '').trim();

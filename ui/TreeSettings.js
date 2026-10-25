@@ -244,24 +244,16 @@ export function TreeSettings(props) {
             title: `把整棵树显示为 ${v.label}（展开树不变，仅翻译文本）`,
             style: chip(v.id === currentViewId),
           }, v.label))),
-        // 对比视图：勾选后主位置显示当前视图、注释位置显示所选视图（再点一次取消）
+        // 对比视图：暂时只保留「关闭对比」。
+        // 视图按钮先撤掉（与「显示方式」那组一致的按钮不再出现在这里），
+        // 这块位置留作后续放别的内容；compareView 配置与树上的对比渲染都还在。
         React.createElement('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
           React.createElement('span', { style: { fontSize: 12, color: theme.fgDim } }, '在注释位对比：'),
           React.createElement('button', {
             onClick: () => onChange({ compareView: null }),
             title: '关闭对比，注释位置恢复为空',
             style: chip(!c.compareView),
-          }, '关闭对比'),
-          (views || []).map((v) => {
-            const vid = v.id === undefined ? 'native' : String(v.id);
-            const active = c.compareView != null && String(c.compareView) === vid;
-            return React.createElement('button', {
-              key: vid,
-              onClick: () => onChange({ compareView: active ? null : vid }),
-              title: '主位置保持当前视图，注释位置显示这一种；再点一次取消',
-              style: chip(active),
-            }, v.label);
-          })),
+          }, '关闭对比')),
         ),
       // ④ 滚动跟随
       section('按上下键时屏幕是否跟随',

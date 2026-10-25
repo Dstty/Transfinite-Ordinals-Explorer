@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { deepEqual } from './engine.js';
+import { is_ne, make_tree_from_entries } from './ne/uiEngine.js';
 
 // ----------------------------------------------------------------------------
 //  xlsx 读取（按需动态加载，保持零构建｜不引入打包依赖）
@@ -128,7 +129,8 @@ export function rebuildTreeFromEntries(notation, entries, minLow) {
   const seen = [];
   const unique = [];
   for (const e of entries) {
-    if (seen.some((s) => deepEqual(s, e.expr))) continue;
+    const duplicate = seen.findIndex((s) => deepEqual(s, e.expr));
+    if (duplicate >= 0) { unique[duplicate] = e; continue; }
     seen.push(e.expr);
     unique.push(e);
   }
@@ -137,6 +139,8 @@ export function rebuildTreeFromEntries(notation, entries, minLow) {
   const sorted = unique
     .slice()
     .sort((a, b) => notation.compare(b.expr, a.expr)); // 递减：大在前
+
+  if (is_ne(notation)) return make_tree_from_entries(sorted);
 
   return sorted.map((e) => {
     const node = { expr: e.expr, low: deepCloneLow(lowRef), subitems: [] };
