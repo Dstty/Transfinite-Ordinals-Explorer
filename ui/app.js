@@ -1550,7 +1550,7 @@ width: `calc(100vw / ${fontZoom})`,
     }
       },
     React.createElement("link", {
-      href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap",
+      href: window.__DSH_FONT_STYLESHEET__ || "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap",
       rel: "stylesheet"
     }),
     // 视图标注样式（如 BMS→OCF「超出范围」，颜色随主题）

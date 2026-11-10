@@ -1,4 +1,4 @@
-﻿# 系统文件
+# 系统文件
 Thumbs.db
 Desktop.ini
 .DS_Store
@@ -14,3 +14,7 @@ Desktop.ini
 
 # 本地临时脚本与测试夹具（不发布）
 .tmp-ne/
+
+# Production build and dependencies
+node_modules/
+dist/

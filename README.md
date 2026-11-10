@@ -3,7 +3,7 @@
 googology 超限序数记号探索工具（**v2.5.2**）：输入「记号名 + 表达式」，生成**展开树**，
 逐层探索大序数记号的基本列（FS）展开过程。
 
-零构建纯前端（React 18 UMD + 原生 ES Module），不需要打包器。
+纯前端项目。开发时可直接运行源码（React 18 UMD + 原生 ES Module）；GitHub Pages 推荐使用生产打包，减少首屏请求和外部 CDN 依赖。
 
 ## 运行
 
@@ -27,9 +27,39 @@ node scripts/serve-nocache.mjs
 串行链加载，本地 RTT≈0 看不出问题，一到 GitHub Pages 就是 207 次串行往返 ——
 实测单请求 330～380 ms，**约 68～79 秒才出首屏**。
 
-现在 `core/loader.js` **按清单 `dependsOn` 分层**，同层一次性全部注入（浏览器并行 /
-HTTP/2 多路复用），层间再等。实测分 4 层（1 / 144 / 56 / 6），外推 **约 4.6 秒**。
-请求总数没变，改的是排队方式。
+源码模式的 `core/loader.js` **按清单 `dependsOn` 分层**，同层并行、层间等待，
+分 4 层（1 / 144 / 56 / 6）。这减少了串行等待，但仍有两百多个请求，以及界面模块的依赖下载；
+实际时间还受网络、缓存和外部 CDN 影响，不能用层数直接推算整页耗时。
+
+生产部署使用 `npm ci && npm run build`，将 `dist/` 发布到静态托管：
+
+- 按清单依赖顺序合并旧式脚本，再打包全部 ne 记号、界面和 React，首屏 JavaScript 只需一个请求。
+- JavaScript 压缩并使用内容哈希文件名；React 与 JetBrains Mono 字体由本站提供。
+- 保留全部旧式注册和 `?legacy=1` 回退能力；新增记号仍只需修改原有清单。
+- XLSX 导出仍在使用时加载外部库，不影响首屏。
+
+仓库自带 `.github/workflows/deploy.yml`：推送到 `main` 或 `master` 后构建并部署 `dist/`。
+**首次使用需在仓库 Settings → Pages → Build and deployment → Source 选择 GitHub Actions**。
+若仍选择 Deploy from a branch，发布的将是源码版，无法获得生产打包优化。
+
+本次 Chrome 本地对照（每请求 80 ms 延迟、gzip、无缓存）：源码输入框约 5.03 秒可用，
+生产版约 0.52 秒；JavaScript 请求从 253 个降到 1 个。生产脚本约 1.18 MB，gzip 后约 339 KB。
+两种模式的可见记号列表一致，旧式注册均为 168 个，建树和 `?legacy=1` 均通过验证。
+这些结果不代表所有访问线路的线上耗时。
+
+本地验证：
+
+```bash
+npm ci
+npm test
+npm run build
+# 使用本机 Chrome 验证生产首屏、记号列表、建树和 legacy 模式
+node scripts/verify-production.mjs
+```
+
+浏览器验证对每个请求模拟 80 ms 延迟并启用 gzip，比较无缓存源码与生产版本。
+它是可复现的本地对照，不能视为 GitHub Pages 的实网测速。无 Chrome 的环境可先执行
+`npx playwright install chromium`，再设置环境变量 `TEST_BROWSER=chromium` 运行验证。
 
 代价是一条纪律：**同层文件之间不允许有未声明的依赖**。跨文件全局（`window.NEUTILS`、
 `sequence_display`、`TON_noraise_compare` …）必须在清单里写 `dependsOn`，否则并行时

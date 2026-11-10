@@ -1,0 +1,17 @@
+{
+  "name": "transfinite-ordinals-explorer",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/verify-loader.mjs && node scripts/verify-loader-layers.mjs && node scripts/verify-app-boot.mjs"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "5.2.8",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "playwright": "1.56.1"
+  }
+}
